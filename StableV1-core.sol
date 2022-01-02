@@ -657,7 +657,7 @@ contract StableV1Factory {
     uint public constant delay = 1 days;
     
     address[] internal _tokens;
-    mapping(address => address) public gauges; // token => gauge
+    mapping(address => address) public gauges; // pair => gauge
     mapping(address => address) public bribes; // gauge => bribe
     mapping(address => uint) public weights; // token => weight
     mapping(address => mapping(address => uint)) public votes; // msg.sender => votes
