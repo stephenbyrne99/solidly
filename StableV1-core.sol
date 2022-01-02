@@ -233,6 +233,13 @@ contract StableV1Pair {
         uint amount1In = _balance1 > _reserve1 - amount1Out ? _balance1 - (_reserve1 - amount1Out) : 0;
         require(amount0In > 0 || amount1In > 0, 'StableV1: INSUFFICIENT_INPUT_AMOUNT');
         { // scope for reserve{0,1}Adjusted, avoids stack too deep errors
+        address _token0 = token0;
+        address _token1 = token1;
+        address feeTo = StableV1Factory(factory).feeTo();
+        if (amount0In > 0) _safeTransfer(_token0, feeTo, amount0In / 100000);
+        if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 100000);
+        _balance0 = erc20(_token0).balanceOf(address(this));
+        _balance1 = erc20(_token1).balanceOf(address(this));
         require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'StableV1: K');
         }
 
