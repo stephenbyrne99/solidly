@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-pragma solidity ^0.8.6;
+pragma solidity 0.8.11;
 
 interface ve {
     function locked__end(address) external view returns (uint);
@@ -194,7 +194,7 @@ contract StableV1Pair {
             liquidity = _lp(_balance0/decimals0, _balance1/decimals1) - _lp(_reserve0/decimals0, _reserve1/decimals1);
         }
 
-        require(liquidity > 0, 'StableV1: INSUFFICIENT_LIQUIDITY_MINTED');
+        require(liquidity > 0, 'ILM'); // StableV1: INSUFFICIENT_LIQUIDITY_MINTED
         _mint(to, liquidity);
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
@@ -213,7 +213,7 @@ contract StableV1Pair {
         uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
         amount0 = liquidity * balance0 / _totalSupply; // using balances ensures pro-rata distribution
         amount1 = liquidity * balance1 / _totalSupply; // using balances ensures pro-rata distribution
-        require(amount0 > 0 && amount1 > 0, 'StableV1: INSUFFICIENT_LIQUIDITY_BURNED');
+        require(amount0 > 0 && amount1 > 0, 'ILB'); // StableV1: INSUFFICIENT_LIQUIDITY_BURNED
         _burn(address(this), liquidity);
         _safeTransfer(_token0, to, amount0);
         _safeTransfer(_token1, to, amount1);
@@ -226,7 +226,7 @@ contract StableV1Pair {
 
         // this low-level function should be called from a contract which performs important safety checks
     function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
-        require(amount0Out > 0 || amount1Out > 0, 'StableV1: INSUFFICIENT_OUTPUT_AMOUNT');
+        require(amount0Out > 0 || amount1Out > 0, 'IOA'); // StableV1: INSUFFICIENT_OUTPUT_AMOUNT
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
         require(amount0Out < _reserve0 && amount1Out < _reserve1, 'StableV1: INSUFFICIENT_LIQUIDITY');
 
@@ -235,7 +235,7 @@ contract StableV1Pair {
         { // scope for _token{0,1}, avoids stack too deep errors
         address _token0 = token0;
         address _token1 = token1;
-        require(to != _token0 && to != _token1, 'StableV1: INVALID_TO');
+        require(to != _token0 && to != _token1, 'IT'); // StableV1: INVALID_TO
         if (amount0Out > 0) _safeTransfer(_token0, to, amount0Out); // optimistically transfer tokens
         if (amount1Out > 0) _safeTransfer(_token1, to, amount1Out); // optimistically transfer tokens
         if (data.length > 0) IStableV1Callee(to).hook(msg.sender, amount0Out, amount1Out, data);
@@ -244,7 +244,7 @@ contract StableV1Pair {
         }
         uint amount0In = _balance0 > _reserve0 - amount0Out ? _balance0 - (_reserve0 - amount0Out) : 0;
         uint amount1In = _balance1 > _reserve1 - amount1Out ? _balance1 - (_reserve1 - amount1Out) : 0;
-        require(amount0In > 0 || amount1In > 0, 'StableV1: INSUFFICIENT_INPUT_AMOUNT');
+        require(amount0In > 0 || amount1In > 0, 'IOA'); // StableV1: INSUFFICIENT_INPUT_AMOUNT
         { // scope for reserve{0,1}Adjusted, avoids stack too deep errors
         address _token0 = token0;
         address _token1 = token1;
@@ -253,7 +253,7 @@ contract StableV1Pair {
         if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 100000);
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
-        require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'StableV1: K');
+        require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'K'); // StableV1: K
         }
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
@@ -624,10 +624,10 @@ contract StableV1Factory {
     }
 
     function createPair(address tokenA, address tokenB) external returns (address pair) {
-        require(tokenA != tokenB, 'StableV1: IDENTICAL_ADDRESSES');
+        require(tokenA != tokenB, 'IA'); // StableV1: IDENTICAL_ADDRESSES
         (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        require(token0 != address(0), 'StableV1: ZERO_ADDRESS');
-        require(getPair[token0][token1] == address(0), 'StableV1: PAIR_EXISTS'); // single check is sufficient
+        require(token0 != address(0), 'ZA'); // StableV1: ZERO_ADDRESS
+        require(getPair[token0][token1] == address(0), 'PE'); // StableV1: PAIR_EXISTS - single check is sufficient
         bytes memory bytecode = type(StableV1Pair).creationCode;
         bytes32 salt = keccak256(abi.encodePacked(token0, token1));
         assembly {
