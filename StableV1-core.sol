@@ -344,14 +344,10 @@ contract StableV1Pair {
     }
 }
 
-contract Gauge {
-    
+contract RewardBase {
     uint constant DURATION = 7 days;
     uint constant PRECISION = 10 ** 18;
     uint constant MAXTIME = 4 * 365 * 86400;
-    
-    address public immutable stake;
-    address immutable _ve;
     
     address[] public incentives;
     mapping(address => bool) public isIncentive;
@@ -364,16 +360,7 @@ contract Gauge {
     mapping(address => mapping(address => uint)) public rewards;
 
     uint public totalSupply;
-    uint public derivedSupply;
     mapping(address => uint) public balanceOf;
-    mapping(address => uint) public derivedBalances;
-    
-    constructor(address _stake) {
-        stake = _stake;
-        address __ve = StableV1Factory(msg.sender)._ve();
-        _ve = __ve;
-        incentives[0] = ve(__ve).token();
-    }
 
     function incentivesLength() external view returns (uint) {
         return incentives.length;
@@ -383,7 +370,84 @@ contract Gauge {
         return Math.min(block.timestamp, periodFinish[token]);
     }
 
-    function rewardPerToken(address token) public view returns (uint) {
+    function rewardPerToken(address token) public virtual view returns (uint) {
+        if (totalSupply == 0) {
+            return rewardPerTokenStored[token];
+        }
+        return rewardPerTokenStored[token] + ((lastTimeRewardApplicable(token) - lastUpdateTime[token]) * rewardRate[token] * PRECISION / totalSupply);
+    }
+
+    function earned(address token, address account) public virtual view returns (uint) {
+        return (balanceOf[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
+    }
+
+    function getRewardForDuration(address token) external view returns (uint) {
+        return rewardRate[token] * DURATION;
+    }
+
+    function getReward(address token) public updateReward(token, msg.sender) {
+        uint _reward = rewards[token][msg.sender];
+        rewards[token][msg.sender] = 0;
+        _safeTransfer(token, msg.sender, _reward);
+    }
+    
+    function notifyRewardAmount(address token, uint amount) external updateReward(token, address(0)) {
+        if (block.timestamp >= periodFinish[token]) {
+            rewardRate[token] = amount / DURATION;
+        } else {
+            uint _remaining = periodFinish[token] - block.timestamp;
+            uint _left = _remaining * rewardRate[token];
+            rewardRate[token] = (amount + _left) / DURATION;
+        }
+        
+        lastUpdateTime[token] = block.timestamp;
+        periodFinish[token] = block.timestamp + DURATION;
+
+        if (isIncentive[token] == false) {
+            isIncentive[token] = true;
+            incentives.push(token);
+        }
+    }
+
+    modifier updateReward(address token, address account) {
+        rewardPerTokenStored[token] = rewardPerToken(token);
+        lastUpdateTime[token] = lastTimeRewardApplicable(token);
+        if (account != address(0)) {
+            rewards[token][account] = earned(token, account);
+            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
+        }
+        _;
+    }
+    
+    function _safeTransfer(address token, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))));
+    }
+    
+    function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))));
+    }
+}
+
+contract Gauge is RewardBase {
+    
+    address public immutable stake;
+    address immutable _ve;
+    
+    uint public derivedSupply;
+    mapping(address => uint) public derivedBalances;
+    
+    constructor(address _stake) {
+        stake = _stake;
+        address __ve = StableV1Factory(msg.sender)._ve();
+        _ve = __ve;
+        incentives[0] = ve(__ve).token();
+    }
+
+    function rewardPerToken(address token) public override view returns (uint) {
         if (totalSupply == 0) {
             return rewardPerTokenStored[token];
         }
@@ -396,21 +460,9 @@ contract Gauge {
         uint _adjusted = (totalSupply * ve(_ve).get_adjusted_ve_balance(account, address(this)) / erc20(_ve).totalSupply()) * 60 / 100;
         return Math.min(_derived + _adjusted, _balance);
     }
-    
-    function kick(address account) public {
-        uint _derivedBalance = derivedBalances[account];
-        derivedSupply -= _derivedBalance;
-        _derivedBalance = derivedBalance(account);
-        derivedBalances[account] = _derivedBalance;
-        derivedSupply += _derivedBalance;
-    }
 
-    function earned(address token, address account) public view returns (uint) {
+    function earned(address token, address account) public override view returns (uint) {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
-    }
-
-    function getRewardForDuration(address token) external view returns (uint) {
-        return rewardRate[token] * DURATION;
     }
     
     function deposit() external {
@@ -445,106 +497,29 @@ contract Gauge {
         _safeTransfer(stake, msg.sender, amount);
     }
 
-    function getReward(address token) public updateReward(token, msg.sender) {
-        uint _reward = rewards[token][msg.sender];
-        rewards[token][msg.sender] = 0;
-        _safeTransfer(token, msg.sender, _reward);
-    }
-
     function exit() external {
        _withdraw(balanceOf[msg.sender]);
         getReward(incentives[0]);
     }
-    
-    function notifyRewardAmount(address token, uint amount) external updateReward(token, address(0)) {
-        if (block.timestamp >= periodFinish[token]) {
-            rewardRate[token] = amount / DURATION;
-        } else {
-            uint _remaining = periodFinish[token] - block.timestamp;
-            uint _left = _remaining * rewardRate[token];
-            rewardRate[token] = (amount + _left) / DURATION;
-        }
-        
-        lastUpdateTime[token] = block.timestamp;
-        periodFinish[token] = block.timestamp + DURATION;
-
-        if (isIncentive[token] == false) {
-            isIncentive[token] = true;
-            incentives.push(token);
-        }
-    }
-
-    modifier updateReward(address token, address account) {
-        rewardPerTokenStored[token] = rewardPerToken(token);
-        lastUpdateTime[token] = lastTimeRewardApplicable(token);
-        if (account != address(0)) {
-            rewards[token][account] = earned(token, account);
-            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
-        }
-        _;
-        if (account != address(0)) {
-            kick(account);
-        }
-    }
-    
-    function _safeTransfer(address token, address to, uint256 value) internal {
-        (bool success, bytes memory data) =
-            token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
-    }
-    
-    function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
-        (bool success, bytes memory data) =
-            token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
-    }
 }
 
-contract Bribe {
-    uint constant DURATION = 7 days;
-    uint constant PRECISION = 10 ** 18;
-    uint constant MAXTIME = 4 * 365 * 86400;
+contract Bribe is RewardBase {
 
     address immutable factory;
-    
-    address[] public incentives;
-    mapping(address => bool) public isIncentive;
-    mapping(address => uint) public rewardRate;
-    mapping(address => uint) public periodFinish;
-    mapping(address => uint) public lastUpdateTime;
-    mapping(address => uint) public rewardPerTokenStored;
-    
-    mapping(address => mapping(address => uint)) public userRewardPerTokenPaid;
-    mapping(address => mapping(address => uint)) public rewards;
 
     constructor() {
         factory = msg.sender;
     }
 
-    uint public totalSupply;
-    mapping(address => uint) public balanceOf;
-
-    function incentivesLength() external view returns (uint) {
-        return incentives.length;
-    }
-
-    function lastTimeRewardApplicable(address token) public view returns (uint) {
-        return Math.min(block.timestamp, periodFinish[token]);
-    }
-
-    function rewardPerToken(address token) public view returns (uint) {
+    function rewardPerToken(address token) public override view returns (uint) {
         if (totalSupply == 0) {
             return rewardPerTokenStored[token];
         }
         return rewardPerTokenStored[token] + ((lastTimeRewardApplicable(token) - lastUpdateTime[token]) * rewardRate[token] * PRECISION / totalSupply);
     }
 
-    function earned(address token, address account) public view returns (uint) {
+    function earned(address token, address account) public override view returns (uint) {
         return (balanceOf[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
-    }
-
-    function getRewardForDuration(address token) external view returns (uint) {
-        return rewardRate[token] * DURATION;
     }
     
     function _deposit(uint amount, address account) external {
@@ -557,52 +532,6 @@ contract Bribe {
         require(msg.sender == factory);
         totalSupply -= amount;
         balanceOf[account] -= amount;
-    }
-
-    function getReward(address token) public updateReward(token, msg.sender) {
-        uint _reward = rewards[token][msg.sender];
-        rewards[token][msg.sender] = 0;
-        _safeTransfer(token, msg.sender, _reward);
-    }
-    
-    function notifyRewardAmount(address token, uint amount) external updateReward(token, address(0)) {
-        if (block.timestamp >= periodFinish[token]) {
-            rewardRate[token] = amount / DURATION;
-        } else {
-            uint _remaining = periodFinish[token] - block.timestamp;
-            uint _left = _remaining * rewardRate[token];
-            rewardRate[token] = (amount + _left) / DURATION;
-        }
-        
-        lastUpdateTime[token] = block.timestamp;
-        periodFinish[token] = block.timestamp + DURATION;
-
-        if (isIncentive[token] == false) {
-            isIncentive[token] = true;
-            incentives.push(token);
-        }
-    }
-
-    modifier updateReward(address token, address account) {
-        rewardPerTokenStored[token] = rewardPerToken(token);
-        lastUpdateTime[token] = lastTimeRewardApplicable(token);
-        if (account != address(0)) {
-            rewards[token][account] = earned(token, account);
-            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
-        }
-        _;
-    }
-    
-    function _safeTransfer(address token, address to, uint256 value) internal {
-        (bool success, bytes memory data) =
-            token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
-    }
-    
-    function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
-        (bool success, bytes memory data) =
-            token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
-        require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 }
 
