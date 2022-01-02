@@ -355,20 +355,14 @@ contract Gauge {
     address public immutable stake;
     address immutable _ve;
     address immutable _token;
-    address immutable distribution;
     
-    uint public rewardRate;
-    uint public periodFinish;
-    uint public lastUpdateTime;
-    uint public rewardPerTokenStored;
+    mapping(address => uint) public rewardRate;
+    mapping(address => uint) public periodFinish;
+    mapping(address => uint) public lastUpdateTime;
+    mapping(address => uint) public rewardPerTokenStored;
     
-    modifier onlyDistribution() {
-        require(msg.sender == distribution);
-        _;
-    }
-    
-    mapping(address => uint) public userRewardPerTokenPaid;
-    mapping(address => uint) public rewards;
+    mapping(address => mapping(address => uint)) public userRewardPerTokenPaid;
+    mapping(address => mapping(address => uint)) public rewards;
 
     uint public totalSupply;
     uint public derivedSupply;
@@ -377,20 +371,20 @@ contract Gauge {
     
     constructor(address _stake) {
         stake = _stake;
-        _ve = StableV1Factory(msg.sender)._ve();
-        _token = StableV1Factory(msg.sender).base();
-        distribution = msg.sender;
+        address __ve = StableV1Factory(msg.sender)._ve();
+        _ve = __ve;
+        _token = ve(__ve).token();
     }
 
-    function lastTimeRewardApplicable() public view returns (uint) {
-        return Math.min(block.timestamp, periodFinish);
+    function lastTimeRewardApplicable(address token) public view returns (uint) {
+        return Math.min(block.timestamp, periodFinish[token]);
     }
 
-    function rewardPerToken() public view returns (uint) {
+    function rewardPerToken(address token) public view returns (uint) {
         if (totalSupply == 0) {
-            return rewardPerTokenStored;
+            return rewardPerTokenStored[token];
         }
-        return rewardPerTokenStored + ((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * PRECISION / derivedSupply);
+        return rewardPerTokenStored[token] + ((lastTimeRewardApplicable(token) - lastUpdateTime[token]) * rewardRate[token] * PRECISION / derivedSupply);
     }
     
     function derivedBalance(address account) public view returns (uint) {
@@ -408,12 +402,12 @@ contract Gauge {
         derivedSupply += _derivedBalance;
     }
 
-    function earned(address account) public view returns (uint) {
-        return (derivedBalances[account] * (rewardPerToken() - userRewardPerTokenPaid[account]) / PRECISION) + rewards[account];
+    function earned(address token, address account) public view returns (uint) {
+        return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
-    function getRewardForDuration() external view returns (uint) {
-        return rewardRate * DURATION;
+    function getRewardForDuration(address token) external view returns (uint) {
+        return rewardRate[token] * DURATION;
     }
     
     function deposit() external {
@@ -428,7 +422,7 @@ contract Gauge {
         _deposit(amount, account);
     }
     
-    function _deposit(uint amount, address account) internal updateReward(account) {
+    function _deposit(uint amount, address account) internal updateReward(_token, account) {
         totalSupply += amount;
         balanceOf[account] += amount;
         _safeTransferFrom(stake, account, address(this), amount);
@@ -442,42 +436,42 @@ contract Gauge {
         _withdraw(amount);
     }
     
-    function _withdraw(uint amount) internal updateReward(msg.sender) {
+    function _withdraw(uint amount) internal updateReward(_token, msg.sender) {
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
         _safeTransfer(stake, msg.sender, amount);
     }
 
-    function getReward() public updateReward(msg.sender) {
-        uint _reward = rewards[msg.sender];
-        rewards[msg.sender] = 0;
-        _safeTransfer(_token, msg.sender, _reward);
+    function getReward(address token) public updateReward(token, msg.sender) {
+        uint _reward = rewards[token][msg.sender];
+        rewards[token][msg.sender] = 0;
+        _safeTransfer(token, msg.sender, _reward);
     }
 
     function exit() external {
        _withdraw(balanceOf[msg.sender]);
-        getReward();
+        getReward(_token);
     }
     
-    function notifyRewardAmount(uint amount) external onlyDistribution updateReward(address(0)) {
-        if (block.timestamp >= periodFinish) {
-            rewardRate = amount / DURATION;
+    function notifyRewardAmount(address token, uint amount) external updateReward(token, address(0)) {
+        if (block.timestamp >= periodFinish[token]) {
+            rewardRate[token] = amount / DURATION;
         } else {
-            uint _remaining = periodFinish - block.timestamp;
-            uint _left = _remaining * rewardRate;
-            rewardRate = (amount + _left) / DURATION;
+            uint _remaining = periodFinish[token] - block.timestamp;
+            uint _left = _remaining * rewardRate[token];
+            rewardRate[token] = (amount + _left) / DURATION;
         }
         
-        lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp + DURATION;
+        lastUpdateTime[token] = block.timestamp;
+        periodFinish[token] = block.timestamp + DURATION;
     }
 
-    modifier updateReward(address account) {
-        rewardPerTokenStored = rewardPerToken();
-        lastUpdateTime = lastTimeRewardApplicable();
+    modifier updateReward(address token, address account) {
+        rewardPerTokenStored[token] = rewardPerToken(token);
+        lastUpdateTime[token] = lastTimeRewardApplicable(token);
         if (account != address(0)) {
-            rewards[account] = earned(account);
-            userRewardPerTokenPaid[account] = rewardPerTokenStored;
+            rewards[token][account] = earned(token, account);
+            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
         }
         _;
         if (account != address(0)) {
@@ -688,7 +682,7 @@ contract StableV1Factory {
                     if (_reward > 0) {
                         address _gauge = gauges[_tokens[x]];
                         _safeTransfer(base, _gauge, _reward);
-                        Gauge(_gauge).notifyRewardAmount(_reward);
+                        Gauge(_gauge).notifyRewardAmount(base, _reward);
                     }
                 }
             }
