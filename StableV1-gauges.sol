@@ -90,7 +90,7 @@ abstract contract RewardBase {
         }
     }
 
-    modifier updateReward(address token, address account) {
+    modifier updateReward(address token, address account) virtual {
         rewardPerTokenStored[token] = rewardPerToken(token);
         lastUpdateTime[token] = lastTimeRewardApplicable(token);
         if (account != address(0)) {
@@ -133,6 +133,14 @@ contract Gauge is RewardBase {
             return rewardPerTokenStored[token];
         }
         return rewardPerTokenStored[token] + ((lastTimeRewardApplicable(token) - lastUpdateTime[token]) * rewardRate[token] * PRECISION / derivedSupply);
+    }
+    
+    function kick(address account) public {
+        uint _derivedBalance = derivedBalances[account];
+        derivedSupply -= _derivedBalance;
+        _derivedBalance = derivedBalance(account);
+        derivedBalances[account] = _derivedBalance;
+        derivedSupply += _derivedBalance;
     }
     
     function derivedBalance(address account) public view returns (uint) {
@@ -181,6 +189,19 @@ contract Gauge is RewardBase {
     function exit() external {
        _withdraw(balanceOf[msg.sender]);
         getReward(incentives[0]);
+    }
+
+    modifier updateReward(address token, address account) override {
+        rewardPerTokenStored[token] = rewardPerToken(token);
+        lastUpdateTime[token] = lastTimeRewardApplicable(token);
+        if (account != address(0)) {
+            rewards[token][account] = earned(token, account);
+            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
+        }
+        _;
+        if (account != address(0)) {
+            kick(account);
+        }
     }
 }
 
@@ -339,7 +360,7 @@ contract StableV1Gauges {
         _vote(msg.sender, _poolVote, _weights);
     }
     
-    function addGauge(address _pool) external {
+    function createGauge(address _pool) external {
         require(gauges[_pool] == address(0x0), "exists");
         require(StableV1Factory(factory).isPair(_pool), "!_pool");
         address _gauge = address(new Gauge(_pool));
