@@ -377,8 +377,8 @@ contract Gauge {
     
     constructor(address _stake) {
         stake = _stake;
-        _ve = GaugeProxy(msg.sender)._ve();
-        _token = GaugeProxy(msg.sender).base();
+        _ve = StableV1Factory(msg.sender)._ve();
+        _token = StableV1Factory(msg.sender).base();
         distribution = msg.sender;
     }
 
@@ -533,14 +533,8 @@ contract StableV1Factory {
         emit PairCreated(token0, token1, pair, allPairs.length);
     }
 
-    function setFeeTo(address _feeTo) external {
-        require(msg.sender == feeToSetter, 'StableV1: FORBIDDEN');
+    function setFeeTo(address _feeTo) external onlyG {
         feeTo = _feeTo;
-    }
-
-    function setFeeToSetter(address _feeToSetter) external {
-        require(msg.sender == feeToSetter, 'StableV1: FORBIDDEN');
-        feeToSetter = _feeToSetter;
     }
 
     address public immutable _ve;
