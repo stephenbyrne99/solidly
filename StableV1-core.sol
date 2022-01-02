@@ -354,6 +354,7 @@ contract StableV1Factory {
 
     mapping(address => mapping(address => address)) public getPair;
     address[] public allPairs;
+    mapping(address => bool) public isPair;
 
     event PairCreated(address indexed token0, address indexed token1, address pair, uint);
 
@@ -394,6 +395,7 @@ contract StableV1Factory {
         getPair[token0][token1] = pair;
         getPair[token1][token0] = pair; // populate mapping in the reverse direction
         allPairs.push(pair);
+        isPair[pair] = true;
         emit PairCreated(token0, token1, pair, allPairs.length);
     }
 

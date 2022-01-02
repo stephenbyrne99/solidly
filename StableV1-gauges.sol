@@ -28,6 +28,7 @@ interface ve {
 
 interface StableV1Factory {
     function _ve() external view returns (address);
+    function isPair(address) external view returns (bool);
 }
 
 
@@ -217,9 +218,9 @@ contract Bribe is RewardBase {
 
 contract StableV1Gauges {
     
-
     address public immutable _ve;
     address public immutable base;
+    address public immutable factory;
     address constant ZERO_ADDRESS = 0x0000000000000000000000000000000000000000;
     
     uint public totalWeight;
@@ -229,23 +230,24 @@ contract StableV1Gauges {
     uint public commitgov;
     uint public constant delay = 1 days;
     
-    address[] internal _tokens;
-    mapping(address => address) public gauges; // pair => gauge
+    address[] internal _pools;
+    mapping(address => address) public gauges; // pool => gauge
     mapping(address => address) public bribes; // gauge => bribe
-    mapping(address => uint) public weights; // token => weight
+    mapping(address => uint) public weights; // pool => weight
     mapping(address => mapping(address => uint)) public votes; // msg.sender => votes
-    mapping(address => address[]) public tokenVote;// msg.sender => token
+    mapping(address => address[]) public poolVote;// msg.sender => pools
     mapping(address => uint) public usedWeights;  // msg.sender => total voting weight of user
     mapping(address => bool) public enabled;
     
-    function tokens() external view returns (address[] memory) {
-        return _tokens;
+    function pools() external view returns (address[] memory) {
+        return _pools;
     }
     
-    constructor(address __ve) {
+    constructor(address __ve, address _factory) {
         gov = msg.sender;
         _ve = __ve;
         base = ve(__ve).token();
+        factory = _factory;
     }
     
     modifier onlyG() {
@@ -268,83 +270,84 @@ contract StableV1Gauges {
     }
     
     function _reset(address _owner) internal {
-        address[] storage _tokenVote = tokenVote[_owner];
-        uint _tokenVoteCnt = _tokenVote.length;
+        address[] storage _poolVote = poolVote[_owner];
+        uint _poolVoteCnt = _poolVote.length;
 
-        for (uint i = 0; i < _tokenVoteCnt; i ++) {
-            address _token = _tokenVote[i];
-            uint _votes = votes[_owner][_token];
+        for (uint i = 0; i < _poolVoteCnt; i ++) {
+            address _pool = _poolVote[i];
+            uint _votes = votes[_owner][_pool];
             
             if (_votes > 0) {
                 totalWeight -= _votes;
-                weights[_token] -= _votes;
-                votes[_owner][_token] = 0;
-                Bribe(bribes[gauges[_token]])._withdraw(_votes, _owner);
+                weights[_pool] -= _votes;
+                votes[_owner][_pool] = 0;
+                Bribe(bribes[gauges[_pool]])._withdraw(_votes, _owner);
             }
         }
 
-        delete tokenVote[_owner];
+        delete poolVote[_owner];
     }
     
     function poke(address _owner) public {
-        address[] memory _tokenVote = tokenVote[_owner];
-        uint _tokenCnt = _tokenVote.length;
-        uint[] memory _weights = new uint[](_tokenCnt);
+        address[] memory _poolVote = poolVote[_owner];
+        uint _poolCnt = _poolVote.length;
+        uint[] memory _weights = new uint[](_poolCnt);
         
         uint _prevUsedWeight = usedWeights[_owner];
         uint _weight = ve(_ve).get_adjusted_ve_balance(_owner, ZERO_ADDRESS);
 
-        for (uint i = 0; i < _tokenCnt; i ++) {
-            uint _prevWeight = votes[_owner][_tokenVote[i]];
+        for (uint i = 0; i < _poolCnt; i ++) {
+            uint _prevWeight = votes[_owner][_poolVote[i]];
             _weights[i] = _prevWeight * _weight / _prevUsedWeight;
         }
 
-        _vote(_owner, _tokenVote, _weights);
+        _vote(_owner, _poolVote, _weights);
     }
     
-    function _vote(address _owner, address[] memory _tokenVote, uint[] memory _weights) internal {
+    function _vote(address _owner, address[] memory _poolVote, uint[] memory _weights) internal {
         // _weights[i] = percentage * 100
         _reset(_owner);
-        uint _tokenCnt = _tokenVote.length;
+        uint _poolCnt = _poolVote.length;
         uint _weight = ve(_ve).get_adjusted_ve_balance(_owner, ZERO_ADDRESS);
         uint _totalVoteWeight = 0;
         uint _usedWeight = 0;
 
-        for (uint i = 0; i < _tokenCnt; i ++) {
+        for (uint i = 0; i < _poolCnt; i ++) {
             _totalVoteWeight += _weights[i];
         }
 
-        for (uint i = 0; i < _tokenCnt; i ++) {
-            address _token = _tokenVote[i];
-            address _gauge = gauges[_token];
-            uint _tokenWeight = _weights[i] * _weight / _totalVoteWeight;
+        for (uint i = 0; i < _poolCnt; i ++) {
+            address _pool = _poolVote[i];
+            address _gauge = gauges[_pool];
+            uint _poolWeight = _weights[i] * _weight / _totalVoteWeight;
 
             if (_gauge != address(0x0)) {
-                _usedWeight += _tokenWeight;
-                totalWeight += _tokenWeight;
-                weights[_token] += _tokenWeight;
-                tokenVote[_owner].push(_token);
-                votes[_owner][_token] = _tokenWeight;
-                Bribe(bribes[gauges[_token]])._deposit(_tokenWeight, _owner);
+                _usedWeight += _poolWeight;
+                totalWeight += _poolWeight;
+                weights[_pool] += _poolWeight;
+                poolVote[_owner].push(_pool);
+                votes[_owner][_pool] = _poolWeight;
+                Bribe(bribes[gauges[_pool]])._deposit(_poolWeight, _owner);
             }
         }
 
         usedWeights[_owner] = _usedWeight;
     }
     
-    function vote(address[] calldata _tokenVote, uint[] calldata _weights) external {
-        require(_tokenVote.length == _weights.length);
-        _vote(msg.sender, _tokenVote, _weights);
+    function vote(address[] calldata _poolVote, uint[] calldata _weights) external {
+        require(_poolVote.length == _weights.length);
+        _vote(msg.sender, _poolVote, _weights);
     }
     
-    function addGauge(address _token) external {
-        require(gauges[_token] == address(0x0), "exists");
-        address _gauge = address(new Gauge(_token));
+    function addGauge(address _pool) external {
+        require(gauges[_pool] == address(0x0), "exists");
+        require(StableV1Factory(factory).isPair(_pool), "!_pool");
+        address _gauge = address(new Gauge(_pool));
         address _bribe = address(new Bribe());
         bribes[_gauge] = _bribe;
-        gauges[_token] = _gauge;
-        enabled[_token] = true;
-        _tokens.push(_token);
+        gauges[_pool] = _gauge;
+        enabled[_pool] = true;
+        _pools.push(_pool);
     }
     
     function disable(address _token) external onlyG {
@@ -356,23 +359,23 @@ contract StableV1Gauges {
     }
     
     function length() external view returns (uint) {
-        return _tokens.length;
+        return _pools.length;
     }
     
     function distribute() external {
         uint _balance = erc20(base).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
-            for (uint i = 0; i < _tokens.length; i++) {
-                if (!enabled[_tokens[i]]) {
-                    _totalWeight -= weights[_tokens[i]];
+            for (uint i = 0; i < _pools.length; i++) {
+                if (!enabled[_pools[i]]) {
+                    _totalWeight -= weights[_pools[i]];
                 }
             }
-            for (uint x = 0; x < _tokens.length; x++) {
-                if (enabled[_tokens[x]]) {
-                    uint _reward = _balance * weights[_tokens[x]] / _totalWeight;
+            for (uint x = 0; x < _pools.length; x++) {
+                if (enabled[_pools[x]]) {
+                    uint _reward = _balance * weights[_pools[x]] / _totalWeight;
                     if (_reward > 0) {
-                        address _gauge = gauges[_tokens[x]];
+                        address _gauge = gauges[_pools[x]];
                         _safeTransfer(base, _gauge, _reward);
                         Gauge(_gauge).notifyRewardAmount(base, _reward);
                     }
