@@ -85,11 +85,12 @@ library StableV1Library {
     }
 
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    function quote(uint amountA, uint reserveA, uint reserveB) internal pure returns (uint amountB) {
+    function quote(uint amountA, uint reserveA, uint reserveB, uint decimalsB) internal pure returns (uint amountB) {
         require(amountA > 0, 'StableV1Library: INSUFFICIENT_AMOUNT');
         require(reserveA > 0 && reserveB > 0, 'StableV1Library: INSUFFICIENT_LIQUIDITY');
+        amountA -= amountA/100000; // Fee adjustment
 
-        amountB = _lp(reserveA+amountA, reserveB) - _lp(reserveA, reserveB);
+        amountB = (_lp(reserveA+amountA, reserveB) - _lp(reserveA, reserveB)) * decimalsB;
     }
 
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
@@ -102,8 +103,8 @@ library StableV1Library {
     }
 
     // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
-    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) internal pure returns (uint amountOut) {
-        amountOut = quote(amountIn, reserveIn, reserveOut);
+    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut, uint decimalsOut) internal pure returns (uint amountOut) {
+        amountOut = quote(amountIn, reserveIn, reserveOut, decimalsOut);
     }
 
     // performs chained getAmountOut calculations on any number of pairs
@@ -114,7 +115,7 @@ library StableV1Library {
         for (uint i; i < path.length - 1; i++) {
             (uint reserveIn, uint reserveOut) = getReserves(factory, path[i], path[i + 1]);
             (uint decimalIn, uint decimalOut) = getDecimals(factory, path[i], path[i + 1]);
-            amounts[i + 1] = getAmountOut(amounts[i]/decimalIn, reserveIn/decimalIn, reserveOut/decimalOut);
+            amounts[i + 1] = getAmountOut(amounts[i]/decimalIn, reserveIn/decimalIn, reserveOut/decimalOut, decimalOut);
         }
     }
 
@@ -233,6 +234,9 @@ contract StableV1Router01 {
                 amount0Out, amount1Out, to, new bytes(0)
             );
         }
+    }
+    function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts) {
+        return StableV1Library.getAmountsOut(factory, amountIn, path);
     }
     function swapExactTokensForTokens(
         uint amountIn,

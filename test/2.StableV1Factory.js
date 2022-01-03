@@ -109,10 +109,12 @@ describe("StableV1Factory", function () {
     expect(await pair.balanceOf(owner.address)).to.equal(min_liquidity);
   });
 
-  it("StableV1Router01 swapExactTokensForTokens", async function () {
+  it("StableV1Router01 getAmountsOut", async function () {
     const usdt_1 = ethers.BigNumber.from("1000000");
     const mim_1 = ethers.BigNumber.from("1000000000000000000");
-    
+    const expected_output = await router.getAmountsOut(usdt_1, [usdt.address, mim.address]);
+    await router.swapExactTokensForTokens(usdt_1, expected_output[1], [usdt.address, mim.address], owner.address, Date.now());
+    expect(await mim.balanceOf(owner.address)).to.equal(expected_output[1]);
   });
 
 
