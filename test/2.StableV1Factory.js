@@ -151,5 +151,22 @@ describe("StableV1Factory", function () {
     expect(await gauge.earned(ve.address, owner.address)).to.equal(0);
   });
 
+  it("withdraw gauge stake", async function () {
+    await gauge.exit();
+    expect(await gauge.totalSupply()).to.equal(0);
+  });
+
+  it("add gauge & bribe rewards", async function () {
+    const pair_1000 = ethers.BigNumber.from("1000000000");
+
+    await ve.approve(gauge.address, pair_1000);
+    await ve.approve(bribe.address, pair_1000);
+
+    await gauge.notifyRewardAmount(ve.address, pair_1000);
+    await bribe.notifyRewardAmount(ve.address, pair_1000);
+
+    expect(await gauge.rewardRate(ve.address)).to.equal(ethers.BigNumber.from(1653));
+    expect(await bribe.rewardRate(ve.address)).to.equal(ethers.BigNumber.from(1653));
+  });
 
 });
