@@ -70,6 +70,7 @@ abstract contract RewardBase {
     }
 
     function notifyRewardAmount(address token, uint amount) external updateReward(token, address(0)) {
+        _safeTransferFrom(token, msg.sender, address(this), amount);
         if (block.timestamp >= periodFinish[token]) {
             rewardRate[token] = amount / DURATION;
         } else {
@@ -176,7 +177,7 @@ contract Gauge is RewardBase {
     }
 
     function exit() external {
-       _withdraw(balanceOf[msg.sender]);
+        _withdraw(balanceOf[msg.sender]);
         getReward(incentives[0]);
     }
 
