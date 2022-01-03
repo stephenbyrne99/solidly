@@ -82,13 +82,38 @@ describe("StableV1Factory", function () {
     expect((await pair.token1()).toUpperCase()).to.equal(token1.toUpperCase());
   });
 
-  it("mint tokens for pair mim-usdt", async function () {
+  it("mint & burn tokens for pair mim-usdt", async function () {
     const usdt_1 = ethers.BigNumber.from("1000000");
     const mim_1 = ethers.BigNumber.from("1000000000000000000");
     const lp = await pair.lp(mim_1/1e12, usdt_1/1);
+    const before_balance = await usdt.balanceOf(owner.address);
     await usdt.transfer(pair.address, usdt_1);
     await mim.transfer(pair.address, mim_1);
     await pair.mint(owner.address);
     expect(await pair.balanceOf(owner.address)).to.equal(lp);
+
+    await pair.transfer(pair.address, await pair.balanceOf(owner.address));
+    await pair.burn(owner.address);
+    expect(await usdt.balanceOf(owner.address)).to.equals(before_balance);
   });
+
+  it("StableV1Router01 quoteAddLiquidity & addLiquidity", async function () {
+    const usdt_1000 = ethers.BigNumber.from("1000000000");
+    const mim_1000 = ethers.BigNumber.from("1000000000000000000000");
+    const expected_2000 = ethers.BigNumber.from("2000000000");
+    const min_liquidity = await router.quoteAddLiquidity(mim.address, usdt.address, mim_1000, usdt_1000);
+    expect(min_liquidity).to.equal(expected_2000);
+    await usdt.approve(router.address, ethers.BigNumber.from("1000000000000"));
+    await mim.approve(router.address, ethers.BigNumber.from("1000000000000000000000000"));
+    await router.addLiquidity(mim.address, usdt.address, mim_1000, usdt_1000, min_liquidity, owner.address, Date.now());
+    expect(await pair.balanceOf(owner.address)).to.equal(min_liquidity);
+  });
+
+  it("StableV1Router01 swapExactTokensForTokens", async function () {
+    const usdt_1 = ethers.BigNumber.from("1000000");
+    const mim_1 = ethers.BigNumber.from("1000000000000000000");
+    
+  });
+
+
 });

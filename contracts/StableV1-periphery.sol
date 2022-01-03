@@ -16,6 +16,7 @@ interface IStableV1Pair {
     function burn(address to) external returns (uint amount0, uint amount1);
     function mint(address to) external returns (uint liquidity);
     function getReserves() external view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast);
+    function getDecimals() external view returns (uint _decimals0, uint _decimals1);
 }
 
 interface erc20 {
@@ -84,6 +85,15 @@ library StableV1Library {
         amountB = _lp(reserveA+amountA, reserveB) - _lp(reserveA, reserveB);
     }
 
+    // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
+    function quoteAddLiquidity(address factory, address tokenA, address tokenB, uint amountA, uint amountB) internal view returns (uint liquidity) {
+        (uint amount0, uint amount1) = tokenA < tokenB ? (amountA, amountB) : (amountB, amountA);
+        (uint reserve0, uint reserve1,) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
+        (uint decimals0, uint decimals1) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
+
+        liquidity = _lp((reserve0+amount0)/decimals0, (reserve1+amount1)/decimals1) - _lp(reserve0/decimals0, reserve1/decimals1);
+    }
+
     // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
     function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut) internal pure returns (uint amountOut) {
         amountOut = quote(amountIn, reserveIn, reserveOut);
@@ -134,12 +144,16 @@ contract StableV1Router01 {
         require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 
-    function sortTokens(address tokenA, address tokenB) external view returns (address token0, address token1) {
+    function sortTokens(address tokenA, address tokenB) external pure returns (address token0, address token1) {
       return StableV1Library.sortTokens(tokenA, tokenB);
     }
 
     function pairFor(address tokenA, address tokenB) external view returns (address) {
       return StableV1Library.pairFor(factory, tokenA, tokenB);
+    }
+
+    function quoteAddLiquidity(address tokenA, address tokenB, uint amountA, uint amountB) external view returns (uint liquidity) {
+      return StableV1Library.quoteAddLiquidity(factory, tokenA, tokenB, amountA, amountB);
     }
 
     function addLiquidity(
