@@ -77,6 +77,13 @@ library StableV1Library {
         (reserveA, reserveB) = tokenA == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
     }
 
+    // fetches and sorts the reserves for a pair
+    function getDecimals(address factory, address tokenA, address tokenB) internal view returns (uint decimalA, uint decimalB) {
+        (address token0,) = sortTokens(tokenA, tokenB);
+        (uint decimal0, uint decimal1) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
+        (decimalA, decimalB) = tokenA == token0 ? (decimal0, decimal1) : (decimal1, decimal0);
+    }
+
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
     function quote(uint amountA, uint reserveA, uint reserveB) internal pure returns (uint amountB) {
         require(amountA > 0, 'StableV1Library: INSUFFICIENT_AMOUNT');
@@ -106,7 +113,8 @@ library StableV1Library {
         amounts[0] = amountIn;
         for (uint i; i < path.length - 1; i++) {
             (uint reserveIn, uint reserveOut) = getReserves(factory, path[i], path[i + 1]);
-            amounts[i + 1] = getAmountOut(amounts[i], reserveIn, reserveOut);
+            (uint decimalIn, uint decimalOut) = getDecimals(factory, path[i], path[i + 1]);
+            amounts[i + 1] = getAmountOut(amounts[i]/decimalIn, reserveIn/decimalIn, reserveOut/decimalOut);
         }
     }
 
