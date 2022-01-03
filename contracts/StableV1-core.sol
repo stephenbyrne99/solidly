@@ -60,13 +60,13 @@ library UQ112x112 {
 
 contract StableV1Pair {
     using UQ112x112 for uint224;
-    
+
     string public name;
     string public symbol;
     uint8 public constant decimals = 6;
-    
+
     uint public totalSupply = 0;
-    
+
     mapping(address => mapping (address => uint)) public allowance;
     mapping(address => uint) public balanceOf;
 
@@ -74,14 +74,14 @@ contract StableV1Pair {
     // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
     bytes32 public constant PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
     mapping(address => uint) public nonces;
-    
+
     event Transfer(address indexed from, address indexed to, uint amount);
     event Approval(address indexed owner, address indexed spender, uint amount);
-    
+
     address public factory;
     address public token0;
     address public token1;
-    
+
     uint decimals0;
     uint decimals1;
 
@@ -98,7 +98,7 @@ contract StableV1Pair {
         _reserve1 = reserve1;
         _blockTimestampLast = blockTimestampLast;
     }
-    
+
     function getDecimals() public view returns (uint _decimals0, uint _decimals1) {
         _decimals0 = decimals0;
         _decimals1 = decimals1;
@@ -116,13 +116,13 @@ contract StableV1Pair {
     );
     event Sync(uint112 reserve0, uint112 reserve1);
 
-    
+
     function _safeTransfer(address token,address to,uint256 value) internal {
         (bool success, bytes memory data) =
             token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
         require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
-    
+
     function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
         (bool success, bytes memory data) =
             token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
@@ -171,7 +171,7 @@ contract StableV1Pair {
         blockTimestampLast = blockTimestamp;
         emit Sync(uint112(reserve0), uint112(reserve1));
     }
-    
+
     uint _unlocked = 1;
     modifier lock() {
         require(_unlocked == 1);
@@ -224,7 +224,7 @@ contract StableV1Pair {
         emit Burn(msg.sender, amount0, amount1, to);
     }
 
-        // this low-level function should be called from a contract which performs important safety checks
+    // this low-level function should be called from a contract which performs important safety checks
     function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
         require(amount0Out > 0 || amount1Out > 0, 'IOA'); // StableV1: INSUFFICIENT_OUTPUT_AMOUNT
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
@@ -272,21 +272,21 @@ contract StableV1Pair {
     function sync() external lock {
         _update(erc20(token0).balanceOf(address(this)), erc20(token1).balanceOf(address(this)), reserve0, reserve1);
     }
-    
+
     function _lp(uint x, uint y) internal pure returns (uint) {
         return Math.sqrt(Math.sqrt(_curve(x, y))) * 2;
     }
-    
+
     function _curve(uint x, uint y) internal pure returns (uint) {
         return x * y * (x**2+y**2) / 2;
     }
-    
+
     function _mint(address dst, uint amount) internal {
         totalSupply += amount;
         balanceOf[dst] += amount;
         emit Transfer(address(0), dst, amount);
     }
-        
+
     function _burn(address dst, uint amount) internal {
         totalSupply -= amount;
         balanceOf[dst] -= amount;
@@ -339,7 +339,7 @@ contract StableV1Pair {
     function _transferTokens(address src, address dst, uint amount) internal {
         balanceOf[src] -= amount;
         balanceOf[dst] += amount;
-        
+
         emit Transfer(src, dst, amount);
     }
 }
@@ -365,17 +365,17 @@ contract StableV1Factory {
     function pairCodeHash() external pure returns (bytes32) {
         return keccak256(type(StableV1Pair).creationCode);
     }
-    
+
     modifier onlyG() {
         require(msg.sender == gov);
         _;
     }
-    
+
     function setGov(address _gov) external onlyG {
         nextgov = _gov;
         commitgov = block.timestamp + delay;
     }
-    
+
     function acceptGov() external {
         require(msg.sender == nextgov && commitgov < block.timestamp);
         gov = nextgov;
