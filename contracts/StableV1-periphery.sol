@@ -65,7 +65,7 @@ library StableV1Library {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1)),
-                hex'ff' // init code hash
+                hex'23b1a9e50f16bab3f9e1ffc37e8b633d0daf5c5bbb4eddaddb52c60c2e782db1' // init code hash
             )))));
     }
 
@@ -132,6 +132,14 @@ contract StableV1Router01 {
         (bool success, bytes memory data) =
             token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
         require(success && (data.length == 0 || abi.decode(data, (bool))));
+    }
+
+    function sortTokens(address tokenA, address tokenB) external view returns (address token0, address token1) {
+      return StableV1Library.sortTokens(tokenA, tokenB);
+    }
+
+    function pairFor(address tokenA, address tokenB) external view returns (address) {
+      return StableV1Library.pairFor(factory, tokenA, tokenB);
     }
 
     function addLiquidity(

@@ -8,8 +8,8 @@ contract Token {
     uint256 public decimals;
     uint256 public totalSupply = 0;
 
-    mapping(address => uint256) balanceOf;
-    mapping(address => mapping(address => uint256)) allowance;
+    mapping(address => uint256) public balanceOf;
+    mapping(address => mapping(address => uint256)) public allowance;
 
     event Transfer(address from, address to, uint256 value);
     event Approval(address owner, address spender, uint256 value);

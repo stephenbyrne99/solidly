@@ -194,6 +194,7 @@ contract StableV1Pair {
             liquidity = _lp(_balance0/decimals0, _balance1/decimals1) - _lp(_reserve0/decimals0, _reserve1/decimals1);
         }
 
+
         require(liquidity > 0, 'ILM'); // StableV1: INSUFFICIENT_LIQUIDITY_MINTED
         _mint(to, liquidity);
 
@@ -273,8 +274,16 @@ contract StableV1Pair {
         _update(erc20(token0).balanceOf(address(this)), erc20(token1).balanceOf(address(this)), reserve0, reserve1);
     }
 
+    function lp(uint x, uint y) external pure returns (uint) {
+        return _lp(x,y);
+    }
+
     function _lp(uint x, uint y) internal pure returns (uint) {
         return Math.sqrt(Math.sqrt(_curve(x, y))) * 2;
+    }
+
+    function curve(uint x, uint y) external pure returns (uint) {
+        return _curve(x,y);
     }
 
     function _curve(uint x, uint y) internal pure returns (uint) {
