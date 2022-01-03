@@ -198,4 +198,8 @@ describe("StableV1Factory", function () {
     await gauge_factory.distribute();
   });
 
+  it("bribe claim rewards", async function () {
+    await bribe.getReward(ve.address);
+  });
+
 });
