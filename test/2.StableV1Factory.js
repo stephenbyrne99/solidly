@@ -177,4 +177,25 @@ describe("StableV1Factory", function () {
     expect(await gauge.totalSupply()).to.equal(0);
   });
 
+  it("gauge reset", async function () {
+    await gauge_factory.reset();
+  });
+
+  it("gauge poke self", async function () {
+    await gauge_factory.poke(owner.address);
+  });
+
+  it("gauge vote & bribe balanceOf", async function () {
+    await gauge_factory.vote([pair.address], [100]);
+    expect(await gauge_factory.totalWeight()).to.not.equal(0);
+    expect(await bribe.balanceOf(owner.address)).to.not.equal(0);
+  });
+
+  it("gauge distribute based on voting", async function () {
+    const pair_1000 = ethers.BigNumber.from("1000000000");
+    await gauge_factory.distribute();
+    await ve.transfer(gauge_factory.address, pair_1000);
+    await gauge_factory.distribute();
+  });
+
 });

@@ -369,6 +369,7 @@ contract StableV1Gauges {
         gauges[_pool] = _gauge;
         enabled[_pool] = true;
         _pools.push(_pool);
+        erc20(base).approve(_gauge, type(uint).max);
         return _gauge;
     }
 
@@ -398,7 +399,6 @@ contract StableV1Gauges {
                     uint _reward = _balance * weights[_pools[x]] / _totalWeight;
                     if (_reward > 0) {
                         address _gauge = gauges[_pools[x]];
-                        _safeTransfer(base, _gauge, _reward);
                         Gauge(_gauge).notifyRewardAmount(base, _reward);
                     }
                 }
