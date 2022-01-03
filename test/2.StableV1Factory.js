@@ -22,16 +22,21 @@ describe("StableV1Factory", function () {
   let token;
   let usdt;
   let mim;
+  let ve;
   let factory;
   let router;
   let pair;
   let owner;
+  let gauge_factory;
+  let gauge;
+  let bribe;
 
   it("deploy stable coins", async function () {
     [owner] = await ethers.getSigners();
     token = await ethers.getContractFactory("Token");
     usdt = await token.deploy('USDT', 'USDT', 6);
     mim = await token.deploy('MIM', 'MIM', 18);
+    ve = await token.deploy('VE', 'VE', 18);
 
     usdt.deployed();
     mim.deployed();
@@ -109,12 +114,41 @@ describe("StableV1Factory", function () {
     expect(await pair.balanceOf(owner.address)).to.equal(min_liquidity);
   });
 
-  it("StableV1Router01 getAmountsOut", async function () {
+  it("StableV1Router01 getAmountsOut & swapExactTokensForTokens", async function () {
     const usdt_1 = ethers.BigNumber.from("1000000");
     const mim_1 = ethers.BigNumber.from("1000000000000000000");
     const expected_output = await router.getAmountsOut(usdt_1, [usdt.address, mim.address]);
     await router.swapExactTokensForTokens(usdt_1, expected_output[1], [usdt.address, mim.address], owner.address, Date.now());
     expect(await mim.balanceOf(owner.address)).to.equal(expected_output[1]);
+  });
+
+  it("deploy StableV1Factory and test pair length", async function () {
+    const StableV1Gauges = await ethers.getContractFactory("StableV1Gauges");
+    gauge_factory = await StableV1Gauges.deploy(ve.address, factory.address);
+    await gauge_factory.deployed();
+
+    expect(await gauge_factory.length()).to.equal(0);
+  });
+
+  it("deploy StableV1Factory gauge", async function () {
+    const pair_1000 = ethers.BigNumber.from("1000000000");
+
+    await gauge_factory.createGauge(pair.address);
+    expect(await gauge_factory.gauges(pair.address)).to.not.equal(0x0000000000000000000000000000000000000000);
+
+    const gauge_address = await gauge_factory.gauges(pair.address);
+    const bribe_address = await gauge_factory.bribes(gauge_address);
+
+    const Gauge = await ethers.getContractFactory("Gauge");
+    gauge = await Gauge.attach(gauge_address);
+
+    const Bribe = await ethers.getContractFactory("Bribe");
+    bribe = await Bribe.attach(bribe_address);
+
+    await pair.approve(gauge.address, pair_1000);
+    await gauge.deposit(pair_1000, owner.address);
+    expect(await gauge.totalSupply()).to.equal(pair_1000);
+    expect(await gauge.earned(ve.address, owner.address)).to.equal(0);
   });
 
 

@@ -23,12 +23,21 @@ contract Token {
         symbol = _symbol;
         decimals = _decimals;
         balanceOf[msg.sender] = 1000e18;
+        totalSupply = 1000e18;
     }
 
     function approve(address _spender, uint256 _value) public returns (bool) {
         allowance[msg.sender][_spender] = _value;
         emit Approval(msg.sender, _spender, _value);
         return true;
+    }
+
+    function token() external view returns (address) {
+        return address(this);
+    }
+
+    function get_adjusted_ve_balance(address account, address delegate) external view returns (uint) {
+        return balanceOf[account];
     }
 
     function _transfer(

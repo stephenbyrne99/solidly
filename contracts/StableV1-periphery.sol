@@ -66,7 +66,7 @@ library StableV1Library {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1)),
-                hex'23b1a9e50f16bab3f9e1ffc37e8b633d0daf5c5bbb4eddaddb52c60c2e782db1' // init code hash
+                hex'8acbde1f4c41835d512e733901bbdde35c93fcbd59f1dd409a73226e95ca696b' // init code hash
             )))));
     }
 

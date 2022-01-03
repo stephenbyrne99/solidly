@@ -20,14 +20,11 @@ interface erc20 {
 }
 
 interface ve {
-    function locked__end(address) external view returns (uint);
-    function deposit_for(address, uint) external;
     function token() external view returns (address);
     function get_adjusted_ve_balance(address, address) external view returns (uint);
 }
 
 interface IStableV1Factory {
-    function _ve() external view returns (address);
     function isPair(address) external view returns (bool);
 }
 
@@ -90,15 +87,7 @@ abstract contract RewardBase {
         }
     }
 
-    modifier updateReward(address token, address account) virtual {
-        rewardPerTokenStored[token] = rewardPerToken(token);
-        lastUpdateTime[token] = lastTimeRewardApplicable(token);
-        if (account != address(0)) {
-            rewards[token][account] = earned(token, account);
-            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
-        }
-        _;
-    }
+    modifier updateReward(address token, address account) virtual;
 
     function _safeTransfer(address token, address to, uint256 value) internal {
         (bool success, bytes memory data) =
@@ -123,9 +112,9 @@ contract Gauge is RewardBase {
 
     constructor(address _stake) {
         stake = _stake;
-        address __ve = IStableV1Factory(msg.sender)._ve();
+        address __ve = StableV1Gauges(msg.sender)._ve();
         _ve = __ve;
-        incentives[0] = ve(__ve).token();
+        incentives.push(ve(__ve).token());
     }
 
     function rewardPerToken(address token) public override view returns (uint) {
@@ -154,13 +143,13 @@ contract Gauge is RewardBase {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
-    function deposit() external {
+    /*function deposit() external {
         _deposit(erc20(stake).balanceOf(msg.sender), msg.sender);
     }
 
     function deposit(uint amount) external {
         _deposit(amount, msg.sender);
-    }
+    }*/
 
     function deposit(uint amount, address account) external {
         _deposit(amount, account);
@@ -234,6 +223,16 @@ contract Bribe is RewardBase {
         require(msg.sender == factory);
         totalSupply -= amount;
         balanceOf[account] -= amount;
+    }
+
+    modifier updateReward(address token, address account) override {
+        rewardPerTokenStored[token] = rewardPerToken(token);
+        lastUpdateTime[token] = lastTimeRewardApplicable(token);
+        if (account != address(0)) {
+            rewards[token][account] = earned(token, account);
+            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
+        }
+        _;
     }
 }
 
@@ -360,7 +359,7 @@ contract StableV1Gauges {
         _vote(msg.sender, _poolVote, _weights);
     }
 
-    function createGauge(address _pool) external {
+    function createGauge(address _pool) external returns (address) {
         require(gauges[_pool] == address(0x0), "exists");
         require(IStableV1Factory(factory).isPair(_pool), "!_pool");
         address _gauge = address(new Gauge(_pool));
@@ -369,6 +368,7 @@ contract StableV1Gauges {
         gauges[_pool] = _gauge;
         enabled[_pool] = true;
         _pools.push(_pool);
+        return _gauge;
     }
 
     function disable(address _token) external onlyG {
