@@ -22,8 +22,6 @@ contract Token {
         name = _name;
         symbol = _symbol;
         decimals = _decimals;
-        balanceOf[msg.sender] = 1000e18;
-        totalSupply = 1000e18;
     }
 
     function approve(address _spender, uint256 _value) public returns (bool) {
@@ -38,6 +36,14 @@ contract Token {
 
     function get_adjusted_ve_balance(address account, address delegate) external view returns (uint) {
         return balanceOf[account];
+    }
+
+    function mint(address _to, uint _amount) external returns (bool) {
+
+        balanceOf[_to] = _amount;
+        totalSupply = _amount;
+        emit Transfer(address(0x0), _to, _amount);
+        return True;
     }
 
     function _transfer(
