@@ -7,6 +7,7 @@ interface IStableV1Factory {
     function pairCodeHash() external pure returns (bytes32);
     function getPair(address, address) external view returns (address);
     function createPair(address tokenA, address tokenB) external returns (address pair);
+    function isPair(address) external view returns (bool);
 }
 
 interface IStableV1Pair {
@@ -154,15 +155,19 @@ contract StableV1Router01 {
     }
 
     function sortTokens(address tokenA, address tokenB) external pure returns (address token0, address token1) {
-      return StableV1Library.sortTokens(tokenA, tokenB);
+        return StableV1Library.sortTokens(tokenA, tokenB);
     }
 
     function pairFor(address tokenA, address tokenB) external view returns (address) {
-      return StableV1Library.pairFor(factory, tokenA, tokenB);
+        return StableV1Library.pairFor(factory, tokenA, tokenB);
     }
 
     function quoteAddLiquidity(address tokenA, address tokenB, uint amountA, uint amountB) external view returns (uint liquidity) {
-      return StableV1Library.quoteAddLiquidity(factory, tokenA, tokenB, amountA, amountB);
+        return StableV1Library.quoteAddLiquidity(factory, tokenA, tokenB, amountA, amountB);
+    }
+
+    function isPair(address pair) external view returns (bool) {
+        return IStableV1Factory(factory).isPair(pair);
     }
 
     function addLiquidity(
