@@ -144,13 +144,13 @@ contract Gauge is RewardBase {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
-    function deposit() external {
+    /*function deposit() external {
         _deposit(erc20(stake).balanceOf(msg.sender), msg.sender);
     }
 
     function deposit(uint amount) external {
         _deposit(amount, msg.sender);
-    }
+    }*/
 
     function deposit(uint amount, address account) external {
         _deposit(amount, account);

@@ -67,7 +67,7 @@ library StableV1Library {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1)),
-                hex'8acbde1f4c41835d512e733901bbdde35c93fcbd59f1dd409a73226e95ca696b' // init code hash
+                hex'50ea65186cdf3f4397ab611de365a919217d81958a7f2217a72369d5d6d29708' // init code hash
             )))));
     }
 
@@ -89,7 +89,7 @@ library StableV1Library {
     function quote(uint amountA, uint reserveA, uint reserveB, uint decimalsB) internal pure returns (uint amountB) {
         require(amountA > 0, 'StableV1Library: INSUFFICIENT_AMOUNT');
         require(reserveA > 0 && reserveB > 0, 'StableV1Library: INSUFFICIENT_LIQUIDITY');
-        amountA -= amountA/100000; // Fee adjustment
+        amountA -= amountA/10000; // Fee adjustment
 
         amountB = (_lp(reserveA+amountA, reserveB) - _lp(reserveA, reserveB)) * decimalsB;
     }

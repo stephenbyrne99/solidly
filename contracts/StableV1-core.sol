@@ -250,8 +250,8 @@ contract StableV1Pair {
         address _token0 = token0;
         address _token1 = token1;
         address feeTo = StableV1Factory(factory).feeTo();
-        if (amount0In > 0) _safeTransfer(_token0, feeTo, amount0In / 100000);
-        if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 100000);
+        if (amount0In > 0) _safeTransfer(_token0, feeTo, amount0In / 10000);
+        if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 10000);
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
         require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'K'); // StableV1: K

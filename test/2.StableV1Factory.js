@@ -34,9 +34,12 @@ describe("StableV1Factory", function () {
   it("deploy stable coins", async function () {
     [owner] = await ethers.getSigners();
     token = await ethers.getContractFactory("Token");
-    ust = await token.deploy('ust', 'ust', 6);
-    mim = await token.deploy('MIM', 'MIM', 18);
-    ve = await token.deploy('VE', 'VE', 18);
+    ust = await token.deploy('ust', 'ust', 6, owner.address);
+    await ust.mint(owner.address, ethers.BigNumber.from("1000000000000000"));
+    mim = await token.deploy('MIM', 'MIM', 18, owner.address);
+    await mim.mint(owner.address, ethers.BigNumber.from("1000000000000000000000"));
+    ve = await token.deploy('VE', 'VE', 18, owner.address);
+    await ve.mint(owner.address, ethers.BigNumber.from("10000000000000000000000000000"));
 
     ust.deployed();
     mim.deployed();
@@ -54,6 +57,7 @@ describe("StableV1Factory", function () {
     const StableV1Factory = await ethers.getContractFactory("StableV1Factory");
     factory = await StableV1Factory.deploy();
     await factory.deployed();
+    console.log(await factory.pairCodeHash());
 
     expect(await factory.allPairsLength()).to.equal(0);
   });
