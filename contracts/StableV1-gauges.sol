@@ -360,6 +360,34 @@ contract StableV1Gauges {
         _vote(msg.sender, _poolVote, _weights);
     }
 
+    function enabledPools() external view returns (address[] memory active) {
+        uint _size = 0;
+        for (uint i = 0; i < _pools.length; i++) {
+            if (enabled[_pools[i]]) {
+                _size++;
+            }
+        }
+        uint x = 0;
+        active = new address[](_size);
+        for (uint i = 0; i < _pools.length; i++) {
+            if (enabled[_pools[i]]) {
+                active[x++] = _pools[i];
+            }
+        }
+    }
+
+    function forceGauge(address _pool) external onlyG returns (address) {
+        require(gauges[_pool] == address(0x0), "exists");
+        address _gauge = address(new Gauge(_pool));
+        address _bribe = address(new Bribe());
+        bribes[_gauge] = _bribe;
+        gauges[_pool] = _gauge;
+        enabled[_pool] = true;
+        _pools.push(_pool);
+        erc20(base).approve(_gauge, type(uint).max);
+        return _gauge;
+    }
+
     function createGauge(address _pool) external returns (address) {
         require(gauges[_pool] == address(0x0), "exists");
         require(IStableV1Factory(factory).isPair(_pool), "!_pool");
