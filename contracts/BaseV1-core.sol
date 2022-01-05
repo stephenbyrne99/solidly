@@ -62,7 +62,9 @@ contract BaseV1Pair {
 
     string public name;
     string public symbol;
-    uint8 public constant decimals = 6;
+    uint8 public decimals;
+
+    bool public stable;
 
     uint public totalSupply = 0;
 
@@ -73,6 +75,8 @@ contract BaseV1Pair {
     // keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
     bytes32 public constant PERMIT_TYPEHASH = 0x6e71edae12b1b97f4d1f60370fef10105fa2faae0126114a169c64845d6126c9;
     mapping(address => uint) public nonces;
+
+    uint public constant MINIMUM_LIQUIDITY = 10**3;
 
     event Transfer(address indexed from, address indexed to, uint amount);
     event Approval(address indexed owner, address indexed spender, uint amount);
@@ -146,14 +150,24 @@ contract BaseV1Pair {
     }
 
     // called once by the factory at time of deployment
-    function initialize(address _token0, address _token1) external {
-        require(msg.sender == factory, 'BaseV1: FORBIDDEN'); // sufficient check
+    function initialize(address _token0, address _token1, bool _stable) external {
+        require(msg.sender == factory, 'StableV1: FORBIDDEN'); // sufficient check
         token0 = _token0;
         token1 = _token1;
-        decimals0 = 10**(erc20(_token0).decimals()-6);
-        decimals1 = 10**(erc20(_token1).decimals()-6);
-        name = string(abi.encodePacked("Base AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
-        symbol = string(abi.encodePacked("bAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+        stable = _stable;
+        if (_stable) {
+            decimals = 6;
+            decimals0 = 10**(erc20(_token0).decimals()-6);
+            decimals1 = 10**(erc20(_token1).decimals()-6);
+            name = string(abi.encodePacked("StableV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+            symbol = string(abi.encodePacked("sAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+        } else {
+            decimals = 18;
+            decimals0 = 1;
+            decimals1 = 1;
+            name = string(abi.encodePacked("VolatileV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+            symbol = string(abi.encodePacked("vAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+        }
     }
 
     // update reserves and, on the first call per block, price accumulators
@@ -187,13 +201,13 @@ contract BaseV1Pair {
         uint _amount0 = _balance0 - _reserve0;
         uint _amount1 = _balance1 - _reserve1;
 
-        if (totalSupply == 0) {
-            liquidity = _lp(_amount0/decimals0, _amount1/decimals1);
+        uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
+        if (_totalSupply == 0) {
+            liquidity = Math.sqrt(_amount0 * _amount1) - MINIMUM_LIQUIDITY;
+            _mint(address(0), MINIMUM_LIQUIDITY); // permanently lock the first MINIMUM_LIQUIDITY tokens
         } else {
-            liquidity = _lp(_balance0/decimals0, _balance1/decimals1) - _lp(_reserve0/decimals0, _reserve1/decimals1);
+            liquidity = Math.min(_amount0 * _totalSupply / _reserve0, _amount1 * _totalSupply / _reserve1);
         }
-
-
         require(liquidity > 0, 'ILM'); // BaseV1: INSUFFICIENT_LIQUIDITY_MINTED
         _mint(to, liquidity);
 
@@ -253,7 +267,7 @@ contract BaseV1Pair {
         if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 10000);
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
-        require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
+        require(_k(_balance0/decimals0, _balance1/decimals1) > _k(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
         }
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
@@ -273,20 +287,30 @@ contract BaseV1Pair {
         _update(erc20(token0).balanceOf(address(this)), erc20(token1).balanceOf(address(this)), reserve0, reserve1);
     }
 
-    function lp(uint x, uint y) external pure returns (uint) {
-        return _lp(x,y);
+    function quote(uint amountA, uint reserveA, uint reserveB) external view returns (uint) {
+        if (stable) {
+            return Math.sqrt(Math.sqrt(_k(amountA+reserveA, reserveB))) * 2;
+        } else {
+            return amountA * reserveB / reserveA;
+        }
     }
 
-    function _lp(uint x, uint y) internal pure returns (uint) {
-        return Math.sqrt(Math.sqrt(_curve(x, y))) * 2;
+    function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
+        (uint reserveA, uint reserveB,) = getReserves();
+        (reserveA, reserveB) = tokenIn == token0 ? (reserveA, reserveB) : (reserveB, reserveA);
+        if (stable) {
+            return Math.sqrt(Math.sqrt(_k(amountIn+reserveA, reserveB))) * 2;
+        } else {
+            return amountIn * reserveB / reserveA;
+        }
     }
 
-    function curve(uint x, uint y) external pure returns (uint) {
-        return _curve(x,y);
-    }
-
-    function _curve(uint x, uint y) internal pure returns (uint) {
-        return x * y * (x**2+y**2) / 2;
+    function _k(uint x, uint y) internal view returns (uint) {
+      if (stable) {
+          return x * y * (x**2+y**2) / 2;
+      } else {
+          return x * y;
+      }
     }
 
     function _mint(address dst, uint amount) internal {
@@ -389,7 +413,7 @@ contract BaseV1Factory {
         gov = nextgov;
     }
 
-    function createPair(address tokenA, address tokenB) external returns (address pair) {
+    function createPair(address tokenA, address tokenB, bool stable) external returns (address pair) {
         require(tokenA != tokenB, 'IA'); // BaseV1: IDENTICAL_ADDRESSES
         (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         require(token0 != address(0), 'ZA'); // BaseV1: ZERO_ADDRESS
@@ -399,7 +423,7 @@ contract BaseV1Factory {
         assembly {
             pair := create2(0, add(bytecode, 32), mload(bytecode), salt)
         }
-        BaseV1Pair(pair).initialize(token0, token1);
+        BaseV1Pair(pair).initialize(token0, token1, stable);
         getPair[token0][token1] = pair;
         getPair[token1][token0] = pair; // populate mapping in the reverse direction
         allPairs.push(pair);

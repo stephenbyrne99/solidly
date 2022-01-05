@@ -17,7 +17,7 @@ interface IBaseV1Pair {
     function burn(address to) external returns (uint amount0, uint amount1);
     function mint(address to) external returns (uint liquidity);
     function getReserves() external view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast);
-    function getDecimals() external view returns (uint _decimals0, uint _decimals1);
+    function getAmountOut(uint, address) external view returns (uint);
 }
 
 interface erc20 {
@@ -51,84 +51,6 @@ library Math {
     }
 }
 
-library BaseV1Library {
-
-    // returns sorted token addresses, used to handle return values from pairs sorted in this order
-    function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
-        require(tokenA != tokenB, 'BaseV1Library: IDENTICAL_ADDRESSES');
-        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        require(token0 != address(0), 'BaseV1Library: ZERO_ADDRESS');
-    }
-
-    // calculates the CREATE2 address for a pair without making any external calls
-    function pairFor(address factory, address tokenA, address tokenB) internal pure returns (address pair) {
-        (address token0, address token1) = sortTokens(tokenA, tokenB);
-        pair = address(uint160(uint256(keccak256(abi.encodePacked(
-                hex'ff',
-                factory,
-                keccak256(abi.encodePacked(token0, token1)),
-                hex'1ffb69db67960debee372142df3fa714a7e6b964bd03a15d0cbef62803cf6acc' // init code hash
-            )))));
-    }
-
-    // fetches and sorts the reserves for a pair
-    function getReserves(address factory, address tokenA, address tokenB) internal view returns (uint reserveA, uint reserveB) {
-        (address token0,) = sortTokens(tokenA, tokenB);
-        (uint reserve0, uint reserve1,) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
-        (reserveA, reserveB) = tokenA == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
-    }
-
-    // fetches and sorts the reserves for a pair
-    function getDecimals(address factory, address tokenA, address tokenB) internal view returns (uint decimalA, uint decimalB) {
-        (address token0,) = sortTokens(tokenA, tokenB);
-        (uint decimal0, uint decimal1) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
-        (decimalA, decimalB) = tokenA == token0 ? (decimal0, decimal1) : (decimal1, decimal0);
-    }
-
-    // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    function quote(uint amountA, uint reserveA, uint reserveB, uint decimalsB) internal pure returns (uint amountB) {
-        require(amountA > 0, 'BaseV1Library: INSUFFICIENT_AMOUNT');
-        require(reserveA > 0 && reserveB > 0, 'BaseV1Library: INSUFFICIENT_LIQUIDITY');
-        amountA -= amountA/10000; // Fee adjustment
-
-        amountB = (_lp(reserveA+amountA, reserveB) - _lp(reserveA, reserveB)) * decimalsB;
-    }
-
-    // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
-    function quoteAddLiquidity(address factory, address tokenA, address tokenB, uint amountA, uint amountB) internal view returns (uint liquidity) {
-        (uint amount0, uint amount1) = tokenA < tokenB ? (amountA, amountB) : (amountB, amountA);
-        (uint reserve0, uint reserve1,) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
-        (uint decimals0, uint decimals1) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
-
-        liquidity = _lp((reserve0+amount0)/decimals0, (reserve1+amount1)/decimals1) - _lp(reserve0/decimals0, reserve1/decimals1);
-    }
-
-    // given an input amount of an asset and pair reserves, returns the maximum output amount of the other asset
-    function getAmountOut(uint amountIn, uint reserveIn, uint reserveOut, uint decimalsOut) internal pure returns (uint amountOut) {
-        amountOut = quote(amountIn, reserveIn, reserveOut, decimalsOut);
-    }
-
-    // performs chained getAmountOut calculations on any number of pairs
-    function getAmountsOut(address factory, uint amountIn, address[] memory path) internal view returns (uint[] memory amounts) {
-        require(path.length >= 2, 'UniswapV2Library: INVALID_PATH');
-        amounts = new uint[](path.length);
-        amounts[0] = amountIn;
-        for (uint i; i < path.length - 1; i++) {
-            (uint reserveIn, uint reserveOut) = getReserves(factory, path[i], path[i + 1]);
-            (uint decimalIn, uint decimalOut) = getDecimals(factory, path[i], path[i + 1]);
-            amounts[i + 1] = getAmountOut(amounts[i]/decimalIn, reserveIn/decimalIn, reserveOut/decimalOut, decimalOut);
-        }
-    }
-
-    function _lp(uint x, uint y) internal pure returns (uint) {
-        return Math.sqrt(Math.sqrt(_curve(x, y))) * 2;
-    }
-
-    function _curve(uint x, uint y) internal pure returns (uint) {
-        return x * y * (x**2+y**2) / 2;
-    }
-}
-
 contract BaseV1Router01 {
 
     address public immutable factory;
@@ -154,16 +76,38 @@ contract BaseV1Router01 {
         require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 
-    function sortTokens(address tokenA, address tokenB) external pure returns (address token0, address token1) {
-        return BaseV1Library.sortTokens(tokenA, tokenB);
+    function sortTokens(address tokenA, address tokenB) public pure returns (address token0, address token1) {
+        require(tokenA != tokenB, 'BaseV1Router: IDENTICAL_ADDRESSES');
+        (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
+        require(token0 != address(0), 'BaseV1Router: ZERO_ADDRESS');
     }
 
-    function pairFor(address tokenA, address tokenB) external view returns (address) {
-        return BaseV1Library.pairFor(factory, tokenA, tokenB);
+    // calculates the CREATE2 address for a pair without making any external calls
+    function pairFor(address tokenA, address tokenB) public view returns (address pair) {
+        (address token0, address token1) = sortTokens(tokenA, tokenB);
+        pair = address(uint160(uint256(keccak256(abi.encodePacked(
+                hex'ff',
+                factory,
+                keccak256(abi.encodePacked(token0, token1)),
+                hex'b402dc14e227e42eaa90f65735358dab8e70a5c103b89a112b315fa14c8f5ca5' // init code hash
+            )))));
     }
 
-    function quoteAddLiquidity(address tokenA, address tokenB, uint amountA, uint amountB) external view returns (uint liquidity) {
-        return BaseV1Library.quoteAddLiquidity(factory, tokenA, tokenB, amountA, amountB);
+    // fetches and sorts the reserves for a pair
+    function getReserves(address tokenA, address tokenB) public view returns (uint reserveA, uint reserveB) {
+        (address token0,) = sortTokens(tokenA, tokenB);
+        (uint reserve0, uint reserve1,) = IBaseV1Pair(pairFor(tokenA, tokenB)).getReserves();
+        (reserveA, reserveB) = tokenA == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
+    }
+
+    // performs chained getAmountOut calculations on any number of pairs
+    function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts) {
+        require(path.length >= 2, 'BaseV1Router: INVALID_PATH');
+        amounts = new uint[](path.length);
+        amounts[0] = amountIn;
+        for (uint i; i < path.length - 1; i++) {
+            amounts[i + 1] = IBaseV1Pair(pairFor(path[i], path[i+1])).getAmountOut(amountIn, path[i]);
+        }
     }
 
     function isPair(address pair) external view returns (bool) {
@@ -183,7 +127,7 @@ contract BaseV1Router01 {
             IBaseV1Factory(factory).createPair(tokenA, tokenB);
         }
         (amountA, amountB) = (amountADesired, amountBDesired);
-        address pair = BaseV1Library.pairFor(factory, tokenA, tokenB);
+        address pair = pairFor(tokenA, tokenB);
         _safeTransferFrom(tokenA, msg.sender, pair, amountA);
         _safeTransferFrom(tokenB, msg.sender, pair, amountB);
         liquidity = IBaseV1Pair(pair).mint(to);
@@ -201,10 +145,10 @@ contract BaseV1Router01 {
         address to,
         uint deadline
     ) public ensure(deadline) returns (uint amountA, uint amountB) {
-        address pair = BaseV1Library.pairFor(factory, tokenA, tokenB);
+        address pair = pairFor(tokenA, tokenB);
         IBaseV1Pair(pair).transferFrom(msg.sender, pair, liquidity); // send liquidity to pair
         (uint amount0, uint amount1) = IBaseV1Pair(pair).burn(to);
-        (address token0,) = BaseV1Library.sortTokens(tokenA, tokenB);
+        (address token0,) = sortTokens(tokenA, tokenB);
         (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
         require(amountA >= amountAMin, 'BaseV1Router: INSUFFICIENT_A_AMOUNT');
         require(amountB >= amountBMin, 'BaseV1Router: INSUFFICIENT_B_AMOUNT');
@@ -220,7 +164,7 @@ contract BaseV1Router01 {
         uint deadline,
         bool approveMax, uint8 v, bytes32 r, bytes32 s
     ) external returns (uint amountA, uint amountB) {
-        address pair = BaseV1Library.pairFor(factory, tokenA, tokenB);
+        address pair = pairFor(tokenA, tokenB);
         uint value = approveMax ? type(uint).max : liquidity;
         IBaseV1Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
         (amountA, amountB) = removeLiquidity(tokenA, tokenB, liquidity, amountAMin, amountBMin, to, deadline);
@@ -231,17 +175,14 @@ contract BaseV1Router01 {
     function _swap(uint[] memory amounts, address[] memory path, address _to) internal virtual {
         for (uint i; i < path.length - 1; i++) {
             (address input, address output) = (path[i], path[i + 1]);
-            (address token0,) = BaseV1Library.sortTokens(input, output);
+            (address token0,) = sortTokens(input, output);
             uint amountOut = amounts[i + 1];
             (uint amount0Out, uint amount1Out) = input == token0 ? (uint(0), amountOut) : (amountOut, uint(0));
-            address to = i < path.length - 2 ? BaseV1Library.pairFor(factory, output, path[i + 2]) : _to;
-            IBaseV1Pair(BaseV1Library.pairFor(factory, input, output)).swap(
+            address to = i < path.length - 2 ? pairFor(output, path[i + 2]) : _to;
+            IBaseV1Pair(pairFor(input, output)).swap(
                 amount0Out, amount1Out, to, new bytes(0)
             );
         }
-    }
-    function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts) {
-        return BaseV1Library.getAmountsOut(factory, amountIn, path);
     }
     function swapExactTokensForTokens(
         uint amountIn,
@@ -250,10 +191,10 @@ contract BaseV1Router01 {
         address to,
         uint deadline
     ) external ensure(deadline) returns (uint[] memory amounts) {
-        amounts = BaseV1Library.getAmountsOut(factory, amountIn, path);
+        amounts = getAmountsOut(amountIn, path);
         require(amounts[amounts.length - 1] >= amountOutMin, 'UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT');
         _safeTransferFrom(
-            path[0], msg.sender, BaseV1Library.pairFor(factory, path[0], path[1]), amounts[0]
+            path[0], msg.sender, pairFor(path[0], path[1]), amounts[0]
         );
         _swap(amounts, path, to);
     }
