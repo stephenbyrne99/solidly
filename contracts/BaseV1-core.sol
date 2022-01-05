@@ -3,7 +3,6 @@
 pragma solidity 0.8.11;
 
 interface ve {
-    function locked__end(address) external view returns (uint);
     function deposit_for(address, uint) external;
     function token() external view returns (address);
     function get_adjusted_ve_balance(address, address) external view returns (uint);
@@ -40,7 +39,7 @@ library Math {
     }
 }
 
-interface IStableV1Callee {
+interface IBaseV1Callee {
     function hook(address sender, uint amount0, uint amount1, bytes calldata data) external;
 }
 
@@ -58,7 +57,7 @@ library UQ112x112 {
     }
 }
 
-contract StableV1Pair {
+contract BaseV1Pair {
     using UQ112x112 for uint224;
 
     string public name;
@@ -148,18 +147,18 @@ contract StableV1Pair {
 
     // called once by the factory at time of deployment
     function initialize(address _token0, address _token1) external {
-        require(msg.sender == factory, 'StableV1: FORBIDDEN'); // sufficient check
+        require(msg.sender == factory, 'BaseV1: FORBIDDEN'); // sufficient check
         token0 = _token0;
         token1 = _token1;
         decimals0 = 10**(erc20(_token0).decimals()-6);
         decimals1 = 10**(erc20(_token1).decimals()-6);
-        name = string(abi.encodePacked("Stable AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
-        symbol = string(abi.encodePacked("sAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+        name = string(abi.encodePacked("Base AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
+        symbol = string(abi.encodePacked("bAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
     }
 
     // update reserves and, on the first call per block, price accumulators
     function _update(uint balance0, uint balance1, uint112 _reserve0, uint112 _reserve1) private {
-        require(balance0 <= type(uint112).max && balance1 <= type(uint112).max, 'StableV1: OVERFLOW');
+        require(balance0 <= type(uint112).max && balance1 <= type(uint112).max, 'BaseV1: OVERFLOW');
         uint32 blockTimestamp = uint32(block.timestamp % 2**32);
         uint32 timeElapsed = blockTimestamp - blockTimestampLast; // overflow is desired
         if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
@@ -195,7 +194,7 @@ contract StableV1Pair {
         }
 
 
-        require(liquidity > 0, 'ILM'); // StableV1: INSUFFICIENT_LIQUIDITY_MINTED
+        require(liquidity > 0, 'ILM'); // BaseV1: INSUFFICIENT_LIQUIDITY_MINTED
         _mint(to, liquidity);
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
@@ -214,7 +213,7 @@ contract StableV1Pair {
         uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
         amount0 = liquidity * balance0 / _totalSupply; // using balances ensures pro-rata distribution
         amount1 = liquidity * balance1 / _totalSupply; // using balances ensures pro-rata distribution
-        require(amount0 > 0 && amount1 > 0, 'ILB'); // StableV1: INSUFFICIENT_LIQUIDITY_BURNED
+        require(amount0 > 0 && amount1 > 0, 'ILB'); // BaseV1: INSUFFICIENT_LIQUIDITY_BURNED
         _burn(address(this), liquidity);
         _safeTransfer(_token0, to, amount0);
         _safeTransfer(_token1, to, amount1);
@@ -227,34 +226,34 @@ contract StableV1Pair {
 
     // this low-level function should be called from a contract which performs important safety checks
     function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external lock {
-        require(amount0Out > 0 || amount1Out > 0, 'IOA'); // StableV1: INSUFFICIENT_OUTPUT_AMOUNT
+        require(amount0Out > 0 || amount1Out > 0, 'IOA'); // BaseV1: INSUFFICIENT_OUTPUT_AMOUNT
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
-        require(amount0Out < _reserve0 && amount1Out < _reserve1, 'StableV1: INSUFFICIENT_LIQUIDITY');
+        require(amount0Out < _reserve0 && amount1Out < _reserve1, 'BaseV1: INSUFFICIENT_LIQUIDITY');
 
         uint _balance0;
         uint _balance1;
         { // scope for _token{0,1}, avoids stack too deep errors
         address _token0 = token0;
         address _token1 = token1;
-        require(to != _token0 && to != _token1, 'IT'); // StableV1: INVALID_TO
+        require(to != _token0 && to != _token1, 'IT'); // BaseV1: INVALID_TO
         if (amount0Out > 0) _safeTransfer(_token0, to, amount0Out); // optimistically transfer tokens
         if (amount1Out > 0) _safeTransfer(_token1, to, amount1Out); // optimistically transfer tokens
-        if (data.length > 0) IStableV1Callee(to).hook(msg.sender, amount0Out, amount1Out, data);
+        if (data.length > 0) IBaseV1Callee(to).hook(msg.sender, amount0Out, amount1Out, data);
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
         }
         uint amount0In = _balance0 > _reserve0 - amount0Out ? _balance0 - (_reserve0 - amount0Out) : 0;
         uint amount1In = _balance1 > _reserve1 - amount1Out ? _balance1 - (_reserve1 - amount1Out) : 0;
-        require(amount0In > 0 || amount1In > 0, 'IOA'); // StableV1: INSUFFICIENT_INPUT_AMOUNT
+        require(amount0In > 0 || amount1In > 0, 'IOA'); // BaseV1: INSUFFICIENT_INPUT_AMOUNT
         { // scope for reserve{0,1}Adjusted, avoids stack too deep errors
         address _token0 = token0;
         address _token1 = token1;
-        address feeTo = StableV1Factory(factory).feeTo();
+        address feeTo = BaseV1Factory(factory).feeTo();
         if (amount0In > 0) _safeTransfer(_token0, feeTo, amount0In / 10000);
         if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 10000);
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
-        require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'K'); // StableV1: K
+        require(_curve(_balance0/decimals0, _balance1/decimals1) > _curve(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
         }
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
@@ -310,7 +309,7 @@ contract StableV1Pair {
     }
 
     function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external {
-        require(deadline >= block.timestamp, 'StableV1: EXPIRED');
+        require(deadline >= block.timestamp, 'BaseV1: EXPIRED');
         bytes32 digest = keccak256(
             abi.encodePacked(
                 '\x19\x01',
@@ -319,7 +318,7 @@ contract StableV1Pair {
             )
         );
         address recoveredAddress = ecrecover(digest, v, r, s);
-        require(recoveredAddress != address(0) && recoveredAddress == owner, 'StableV1: INVALID_SIGNATURE');
+        require(recoveredAddress != address(0) && recoveredAddress == owner, 'BaseV1: INVALID_SIGNATURE');
         allowance[owner][spender] = value;
 
         emit Approval(owner, spender, value);
@@ -353,7 +352,7 @@ contract StableV1Pair {
     }
 }
 
-contract StableV1Factory {
+contract BaseV1Factory {
 
     address public feeTo;
     address public gov;
@@ -372,7 +371,7 @@ contract StableV1Factory {
     }
 
     function pairCodeHash() external pure returns (bytes32) {
-        return keccak256(type(StableV1Pair).creationCode);
+        return keccak256(type(BaseV1Pair).creationCode);
     }
 
     modifier onlyG() {
@@ -391,16 +390,16 @@ contract StableV1Factory {
     }
 
     function createPair(address tokenA, address tokenB) external returns (address pair) {
-        require(tokenA != tokenB, 'IA'); // StableV1: IDENTICAL_ADDRESSES
+        require(tokenA != tokenB, 'IA'); // BaseV1: IDENTICAL_ADDRESSES
         (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        require(token0 != address(0), 'ZA'); // StableV1: ZERO_ADDRESS
-        require(getPair[token0][token1] == address(0), 'PE'); // StableV1: PAIR_EXISTS - single check is sufficient
-        bytes memory bytecode = type(StableV1Pair).creationCode;
+        require(token0 != address(0), 'ZA'); // BaseV1: ZERO_ADDRESS
+        require(getPair[token0][token1] == address(0), 'PE'); // BaseV1: PAIR_EXISTS - single check is sufficient
+        bytes memory bytecode = type(BaseV1Pair).creationCode;
         bytes32 salt = keccak256(abi.encodePacked(token0, token1));
         assembly {
             pair := create2(0, add(bytecode, 32), mload(bytecode), salt)
         }
-        StableV1Pair(pair).initialize(token0, token1);
+        BaseV1Pair(pair).initialize(token0, token1);
         getPair[token0][token1] = pair;
         getPair[token1][token0] = pair; // populate mapping in the reverse direction
         allPairs.push(pair);

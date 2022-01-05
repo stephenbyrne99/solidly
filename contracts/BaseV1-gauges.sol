@@ -24,7 +24,7 @@ interface ve {
     function get_adjusted_ve_balance(address, address) external view returns (uint);
 }
 
-interface IStableV1Factory {
+interface IBaseV1Factory {
     function isPair(address) external view returns (bool);
 }
 
@@ -113,7 +113,7 @@ contract Gauge is RewardBase {
 
     constructor(address _stake) {
         stake = _stake;
-        address __ve = StableV1Gauges(msg.sender)._ve();
+        address __ve = BaseV1Gauges(msg.sender)._ve();
         _ve = __ve;
         incentives.push(ve(__ve).token());
     }
@@ -237,7 +237,7 @@ contract Bribe is RewardBase {
     }
 }
 
-contract StableV1Gauges {
+contract BaseV1Gauges {
 
     address public immutable _ve;
     address public immutable base;
@@ -390,7 +390,7 @@ contract StableV1Gauges {
 
     function createGauge(address _pool) external returns (address) {
         require(gauges[_pool] == address(0x0), "exists");
-        require(IStableV1Factory(factory).isPair(_pool), "!_pool");
+        require(IBaseV1Factory(factory).isPair(_pool), "!_pool");
         address _gauge = address(new Gauge(_pool));
         address _bribe = address(new Bribe());
         bribes[_gauge] = _bribe;
@@ -415,6 +415,27 @@ contract StableV1Gauges {
 
     function distribute() external {
         uint _balance = erc20(base).balanceOf(address(this));
+        if (_balance > 0 && totalWeight > 0) {
+            uint _totalWeight = totalWeight;
+            for (uint i = 0; i < _pools.length; i++) {
+                if (!enabled[_pools[i]]) {
+                    _totalWeight -= weights[_pools[i]];
+                }
+            }
+            for (uint x = 0; x < _pools.length; x++) {
+                if (enabled[_pools[x]]) {
+                    uint _reward = _balance * weights[_pools[x]] / _totalWeight;
+                    if (_reward > 0) {
+                        address _gauge = gauges[_pools[x]];
+                        Gauge(_gauge).notifyRewardAmount(base, _reward);
+                    }
+                }
+            }
+        }
+    }
+
+    function distribute(address token) external {
+        uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
             for (uint i = 0; i < _pools.length; i++) {

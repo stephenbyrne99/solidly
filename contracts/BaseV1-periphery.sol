@@ -2,7 +2,7 @@
 
 pragma solidity ^0.8.6;
 
-interface IStableV1Factory {
+interface IBaseV1Factory {
     function allPairsLength() external view returns (uint);
     function pairCodeHash() external pure returns (bytes32);
     function getPair(address, address) external view returns (address);
@@ -10,7 +10,7 @@ interface IStableV1Factory {
     function isPair(address) external view returns (bool);
 }
 
-interface IStableV1Pair {
+interface IBaseV1Pair {
     function transferFrom(address src, address dst, uint amount) external returns (bool);
     function permit(address owner, address spender, uint value, uint deadline, uint8 v, bytes32 r, bytes32 s) external;
     function swap(uint amount0Out, uint amount1Out, address to, bytes calldata data) external;
@@ -51,13 +51,13 @@ library Math {
     }
 }
 
-library StableV1Library {
+library BaseV1Library {
 
     // returns sorted token addresses, used to handle return values from pairs sorted in this order
     function sortTokens(address tokenA, address tokenB) internal pure returns (address token0, address token1) {
-        require(tokenA != tokenB, 'StableV1Library: IDENTICAL_ADDRESSES');
+        require(tokenA != tokenB, 'BaseV1Library: IDENTICAL_ADDRESSES');
         (token0, token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
-        require(token0 != address(0), 'StableV1Library: ZERO_ADDRESS');
+        require(token0 != address(0), 'BaseV1Library: ZERO_ADDRESS');
     }
 
     // calculates the CREATE2 address for a pair without making any external calls
@@ -67,28 +67,28 @@ library StableV1Library {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1)),
-                hex'50ea65186cdf3f4397ab611de365a919217d81958a7f2217a72369d5d6d29708' // init code hash
+                hex'1ffb69db67960debee372142df3fa714a7e6b964bd03a15d0cbef62803cf6acc' // init code hash
             )))));
     }
 
     // fetches and sorts the reserves for a pair
     function getReserves(address factory, address tokenA, address tokenB) internal view returns (uint reserveA, uint reserveB) {
         (address token0,) = sortTokens(tokenA, tokenB);
-        (uint reserve0, uint reserve1,) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
+        (uint reserve0, uint reserve1,) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
         (reserveA, reserveB) = tokenA == token0 ? (reserve0, reserve1) : (reserve1, reserve0);
     }
 
     // fetches and sorts the reserves for a pair
     function getDecimals(address factory, address tokenA, address tokenB) internal view returns (uint decimalA, uint decimalB) {
         (address token0,) = sortTokens(tokenA, tokenB);
-        (uint decimal0, uint decimal1) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
+        (uint decimal0, uint decimal1) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
         (decimalA, decimalB) = tokenA == token0 ? (decimal0, decimal1) : (decimal1, decimal0);
     }
 
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
     function quote(uint amountA, uint reserveA, uint reserveB, uint decimalsB) internal pure returns (uint amountB) {
-        require(amountA > 0, 'StableV1Library: INSUFFICIENT_AMOUNT');
-        require(reserveA > 0 && reserveB > 0, 'StableV1Library: INSUFFICIENT_LIQUIDITY');
+        require(amountA > 0, 'BaseV1Library: INSUFFICIENT_AMOUNT');
+        require(reserveA > 0 && reserveB > 0, 'BaseV1Library: INSUFFICIENT_LIQUIDITY');
         amountA -= amountA/10000; // Fee adjustment
 
         amountB = (_lp(reserveA+amountA, reserveB) - _lp(reserveA, reserveB)) * decimalsB;
@@ -97,8 +97,8 @@ library StableV1Library {
     // given some amount of an asset and pair reserves, returns an equivalent amount of the other asset
     function quoteAddLiquidity(address factory, address tokenA, address tokenB, uint amountA, uint amountB) internal view returns (uint liquidity) {
         (uint amount0, uint amount1) = tokenA < tokenB ? (amountA, amountB) : (amountB, amountA);
-        (uint reserve0, uint reserve1,) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
-        (uint decimals0, uint decimals1) = IStableV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
+        (uint reserve0, uint reserve1,) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getReserves();
+        (uint decimals0, uint decimals1) = IBaseV1Pair(pairFor(factory, tokenA, tokenB)).getDecimals();
 
         liquidity = _lp((reserve0+amount0)/decimals0, (reserve1+amount1)/decimals1) - _lp(reserve0/decimals0, reserve1/decimals1);
     }
@@ -129,12 +129,12 @@ library StableV1Library {
     }
 }
 
-contract StableV1Router01 {
+contract BaseV1Router01 {
 
     address public immutable factory;
 
     modifier ensure(uint deadline) {
-        require(deadline >= block.timestamp, 'StableV1Router: EXPIRED');
+        require(deadline >= block.timestamp, 'BaseV1Router: EXPIRED');
         _;
     }
 
@@ -155,19 +155,19 @@ contract StableV1Router01 {
     }
 
     function sortTokens(address tokenA, address tokenB) external pure returns (address token0, address token1) {
-        return StableV1Library.sortTokens(tokenA, tokenB);
+        return BaseV1Library.sortTokens(tokenA, tokenB);
     }
 
     function pairFor(address tokenA, address tokenB) external view returns (address) {
-        return StableV1Library.pairFor(factory, tokenA, tokenB);
+        return BaseV1Library.pairFor(factory, tokenA, tokenB);
     }
 
     function quoteAddLiquidity(address tokenA, address tokenB, uint amountA, uint amountB) external view returns (uint liquidity) {
-        return StableV1Library.quoteAddLiquidity(factory, tokenA, tokenB, amountA, amountB);
+        return BaseV1Library.quoteAddLiquidity(factory, tokenA, tokenB, amountA, amountB);
     }
 
     function isPair(address pair) external view returns (bool) {
-        return IStableV1Factory(factory).isPair(pair);
+        return IBaseV1Factory(factory).isPair(pair);
     }
 
     function addLiquidity(
@@ -179,14 +179,14 @@ contract StableV1Router01 {
         address to,
         uint deadline
     ) external ensure(deadline) returns (uint amountA, uint amountB, uint liquidity) {
-        if (IStableV1Factory(factory).getPair(tokenA, tokenB) == address(0)) {
-            IStableV1Factory(factory).createPair(tokenA, tokenB);
+        if (IBaseV1Factory(factory).getPair(tokenA, tokenB) == address(0)) {
+            IBaseV1Factory(factory).createPair(tokenA, tokenB);
         }
         (amountA, amountB) = (amountADesired, amountBDesired);
-        address pair = StableV1Library.pairFor(factory, tokenA, tokenB);
+        address pair = BaseV1Library.pairFor(factory, tokenA, tokenB);
         _safeTransferFrom(tokenA, msg.sender, pair, amountA);
         _safeTransferFrom(tokenB, msg.sender, pair, amountB);
-        liquidity = IStableV1Pair(pair).mint(to);
+        liquidity = IBaseV1Pair(pair).mint(to);
 
         require(liquidity >= minLiquidity, '< _min_liquidity');
     }
@@ -201,13 +201,13 @@ contract StableV1Router01 {
         address to,
         uint deadline
     ) public ensure(deadline) returns (uint amountA, uint amountB) {
-        address pair = StableV1Library.pairFor(factory, tokenA, tokenB);
-        IStableV1Pair(pair).transferFrom(msg.sender, pair, liquidity); // send liquidity to pair
-        (uint amount0, uint amount1) = IStableV1Pair(pair).burn(to);
-        (address token0,) = StableV1Library.sortTokens(tokenA, tokenB);
+        address pair = BaseV1Library.pairFor(factory, tokenA, tokenB);
+        IBaseV1Pair(pair).transferFrom(msg.sender, pair, liquidity); // send liquidity to pair
+        (uint amount0, uint amount1) = IBaseV1Pair(pair).burn(to);
+        (address token0,) = BaseV1Library.sortTokens(tokenA, tokenB);
         (amountA, amountB) = tokenA == token0 ? (amount0, amount1) : (amount1, amount0);
-        require(amountA >= amountAMin, 'StableV1Router: INSUFFICIENT_A_AMOUNT');
-        require(amountB >= amountBMin, 'StableV1Router: INSUFFICIENT_B_AMOUNT');
+        require(amountA >= amountAMin, 'BaseV1Router: INSUFFICIENT_A_AMOUNT');
+        require(amountB >= amountBMin, 'BaseV1Router: INSUFFICIENT_B_AMOUNT');
     }
 
     function removeLiquidityWithPermit(
@@ -220,9 +220,9 @@ contract StableV1Router01 {
         uint deadline,
         bool approveMax, uint8 v, bytes32 r, bytes32 s
     ) external returns (uint amountA, uint amountB) {
-        address pair = StableV1Library.pairFor(factory, tokenA, tokenB);
+        address pair = BaseV1Library.pairFor(factory, tokenA, tokenB);
         uint value = approveMax ? type(uint).max : liquidity;
-        IStableV1Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
+        IBaseV1Pair(pair).permit(msg.sender, address(this), value, deadline, v, r, s);
         (amountA, amountB) = removeLiquidity(tokenA, tokenB, liquidity, amountAMin, amountBMin, to, deadline);
     }
 
@@ -231,17 +231,17 @@ contract StableV1Router01 {
     function _swap(uint[] memory amounts, address[] memory path, address _to) internal virtual {
         for (uint i; i < path.length - 1; i++) {
             (address input, address output) = (path[i], path[i + 1]);
-            (address token0,) = StableV1Library.sortTokens(input, output);
+            (address token0,) = BaseV1Library.sortTokens(input, output);
             uint amountOut = amounts[i + 1];
             (uint amount0Out, uint amount1Out) = input == token0 ? (uint(0), amountOut) : (amountOut, uint(0));
-            address to = i < path.length - 2 ? StableV1Library.pairFor(factory, output, path[i + 2]) : _to;
-            IStableV1Pair(StableV1Library.pairFor(factory, input, output)).swap(
+            address to = i < path.length - 2 ? BaseV1Library.pairFor(factory, output, path[i + 2]) : _to;
+            IBaseV1Pair(BaseV1Library.pairFor(factory, input, output)).swap(
                 amount0Out, amount1Out, to, new bytes(0)
             );
         }
     }
     function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts) {
-        return StableV1Library.getAmountsOut(factory, amountIn, path);
+        return BaseV1Library.getAmountsOut(factory, amountIn, path);
     }
     function swapExactTokensForTokens(
         uint amountIn,
@@ -250,10 +250,10 @@ contract StableV1Router01 {
         address to,
         uint deadline
     ) external ensure(deadline) returns (uint[] memory amounts) {
-        amounts = StableV1Library.getAmountsOut(factory, amountIn, path);
+        amounts = BaseV1Library.getAmountsOut(factory, amountIn, path);
         require(amounts[amounts.length - 1] >= amountOutMin, 'UniswapV2Router: INSUFFICIENT_OUTPUT_AMOUNT');
         _safeTransferFrom(
-            path[0], msg.sender, StableV1Library.pairFor(factory, path[0], path[1]), amounts[0]
+            path[0], msg.sender, BaseV1Library.pairFor(factory, path[0], path[1]), amounts[0]
         );
         _swap(amounts, path, to);
     }

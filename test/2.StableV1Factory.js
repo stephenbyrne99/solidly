@@ -17,7 +17,7 @@ function getCreate2Address(
   return getAddress(`0x${keccak256(sanitizedInputs).slice(-40)}`)
 }
 
-describe("StableV1Factory", function () {
+describe("BaseV1Factory", function () {
 
   let token;
   let ust;
@@ -31,7 +31,7 @@ describe("StableV1Factory", function () {
   let gauge;
   let bribe;
 
-  it("deploy stable coins", async function () {
+  it("deploy base coins", async function () {
     [owner] = await ethers.getSigners();
     token = await ethers.getContractFactory("Token");
     ust = await token.deploy('ust', 'ust', 6, owner.address);
@@ -53,34 +53,34 @@ describe("StableV1Factory", function () {
     expect(await mim.name()).to.equal("MIM");
   });
 
-  it("deploy StableV1Factory and test pair length", async function () {
-    const StableV1Factory = await ethers.getContractFactory("StableV1Factory");
-    factory = await StableV1Factory.deploy();
+  it("deploy BaseV1Factory and test pair length", async function () {
+    const BaseV1Factory = await ethers.getContractFactory("BaseV1Factory");
+    factory = await BaseV1Factory.deploy();
     await factory.deployed();
     console.log(await factory.pairCodeHash());
 
     expect(await factory.allPairsLength()).to.equal(0);
   });
 
-  it("deploy StableV1Router and test factory address", async function () {
-    const StableV1Router = await ethers.getContractFactory("StableV1Router01");
-    router = await StableV1Router.deploy(factory.address);
+  it("deploy BaseV1Router and test factory address", async function () {
+    const BaseV1Router = await ethers.getContractFactory("BaseV1Router01");
+    router = await BaseV1Router.deploy(factory.address);
     await router.deployed();
 
     expect(await router.factory()).to.equal(factory.address);
   });
 
-  it("deploy pair via StableV1Factory", async function () {
+  it("deploy pair via BaseV1Factory", async function () {
     await factory.createPair(mim.address, ust.address);
     expect(await factory.allPairsLength()).to.equal(1);
   });
 
   it("confirm pair for mim-ust", async function () {
     const create2address = await router.pairFor(mim.address, ust.address);
-    const StableV1Pair = await ethers.getContractFactory("StableV1Pair");
+    const BaseV1Pair = await ethers.getContractFactory("BaseV1Pair");
     const address = await factory.getPair(mim.address, ust.address);
     const allpairs0 = await factory.allPairs(0);
-    pair = await StableV1Pair.attach(address);
+    pair = await BaseV1Pair.attach(address);
 
     expect(pair.address).to.equal(create2address);
   });
@@ -106,7 +106,7 @@ describe("StableV1Factory", function () {
     expect(await ust.balanceOf(owner.address)).to.equals(before_balance);
   });
 
-  it("StableV1Router01 quoteAddLiquidity & addLiquidity", async function () {
+  it("BaseV1Router01 quoteAddLiquidity & addLiquidity", async function () {
     const ust_1000 = ethers.BigNumber.from("1000000000");
     const mim_1000 = ethers.BigNumber.from("1000000000000000000000");
     const expected_2000 = ethers.BigNumber.from("2000000000");
@@ -118,7 +118,7 @@ describe("StableV1Factory", function () {
     expect(await pair.balanceOf(owner.address)).to.equal(min_liquidity);
   });
 
-  it("StableV1Router01 getAmountsOut & swapExactTokensForTokens", async function () {
+  it("BaseV1Router01 getAmountsOut & swapExactTokensForTokens", async function () {
     const ust_1 = ethers.BigNumber.from("1000000");
     const mim_1 = ethers.BigNumber.from("1000000000000000000");
     const expected_output = await router.getAmountsOut(ust_1, [ust.address, mim.address]);
@@ -126,15 +126,15 @@ describe("StableV1Factory", function () {
     expect(await mim.balanceOf(owner.address)).to.equal(expected_output[1]);
   });
 
-  it("deploy StableV1Factory and test pair length", async function () {
-    const StableV1Gauges = await ethers.getContractFactory("StableV1Gauges");
-    gauge_factory = await StableV1Gauges.deploy(ve.address, factory.address);
+  it("deploy BaseV1Factory and test pair length", async function () {
+    const BaseV1Gauges = await ethers.getContractFactory("BaseV1Gauges");
+    gauge_factory = await BaseV1Gauges.deploy(ve.address, factory.address);
     await gauge_factory.deployed();
 
     expect(await gauge_factory.length()).to.equal(0);
   });
 
-  it("deploy StableV1Factory gauge", async function () {
+  it("deploy BaseV1Factory gauge", async function () {
     const pair_1000 = ethers.BigNumber.from("1000000000");
 
     await gauge_factory.createGauge(pair.address);
