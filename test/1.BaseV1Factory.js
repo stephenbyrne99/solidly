@@ -76,9 +76,9 @@ describe("BaseV1Factory", function () {
   });
 
   it("confirm pair for mim-ust", async function () {
-    const create2address = await router.pairFor(mim.address, ust.address);
+    const create2address = await router.pairFor(mim.address, ust.address, true);
     const BaseV1Pair = await ethers.getContractFactory("BaseV1Pair");
-    const address = await factory.getPair(mim.address, ust.address);
+    const address = await factory.getPair(mim.address, ust.address, true);
     const allpairs0 = await factory.allPairs(0);
     pair = await BaseV1Pair.attach(address);
 
@@ -110,14 +110,15 @@ describe("BaseV1Factory", function () {
     const expected_2000 = ethers.BigNumber.from("2000000000");
     await ust.approve(router.address, ethers.BigNumber.from("1000000000000"));
     await mim.approve(router.address, ethers.BigNumber.from("1000000000000000000000000"));
-    await router.addLiquidity(mim.address, ust.address, mim_1000, ust_1000, mim_1000, ust_1000, owner.address, Date.now());
+    await router.addLiquidity(mim.address, ust.address, true, mim_1000, ust_1000, mim_1000, ust_1000, owner.address, Date.now());
   });
 
   it("BaseV1Router01 getAmountsOut & swapExactTokensForTokens", async function () {
     const ust_1 = ethers.BigNumber.from("1000000");
     const mim_1 = ethers.BigNumber.from("1000000000000000000");
-    const expected_output = await router.getAmountsOut(ust_1, [ust.address, mim.address]);
-    await router.swapExactTokensForTokens(ust_1, expected_output[1], [ust.address, mim.address], owner.address, Date.now());
+    const route = {from:ust.address, to:mim.address, stable:true}
+    const expected_output = await router.getAmountsOut(ust_1, [route]);
+    await router.swapExactTokensForTokens(ust_1, expected_output[1], [route], owner.address, Date.now());
   });
 
   it("deploy BaseV1Factory and test pair length", async function () {

@@ -384,11 +384,11 @@ contract BaseV1Factory {
     uint public commitgov;
     uint public constant delay = 1 days;
 
-    mapping(address => mapping(address => address)) public getPair;
+    mapping(address => mapping(address => mapping(bool => address))) public getPair;
     address[] public allPairs;
     mapping(address => bool) public isPair;
 
-    event PairCreated(address indexed token0, address indexed token1, address pair, uint);
+    event PairCreated(address indexed token0, address indexed token1, bool stable, address pair, uint);
 
     function allPairsLength() external view returns (uint) {
         return allPairs.length;
@@ -417,18 +417,18 @@ contract BaseV1Factory {
         require(tokenA != tokenB, 'IA'); // BaseV1: IDENTICAL_ADDRESSES
         (address token0, address token1) = tokenA < tokenB ? (tokenA, tokenB) : (tokenB, tokenA);
         require(token0 != address(0), 'ZA'); // BaseV1: ZERO_ADDRESS
-        require(getPair[token0][token1] == address(0), 'PE'); // BaseV1: PAIR_EXISTS - single check is sufficient
+        require(getPair[token0][token1][stable] == address(0), 'PE'); // BaseV1: PAIR_EXISTS - single check is sufficient
         bytes memory bytecode = type(BaseV1Pair).creationCode;
-        bytes32 salt = keccak256(abi.encodePacked(token0, token1));
+        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
         assembly {
             pair := create2(0, add(bytecode, 32), mload(bytecode), salt)
         }
         BaseV1Pair(pair).initialize(token0, token1, stable);
-        getPair[token0][token1] = pair;
-        getPair[token1][token0] = pair; // populate mapping in the reverse direction
+        getPair[token0][token1][stable] = pair;
+        getPair[token1][token0][stable] = pair; // populate mapping in the reverse direction
         allPairs.push(pair);
         isPair[pair] = true;
-        emit PairCreated(token0, token1, pair, allPairs.length);
+        emit PairCreated(token0, token1, stable, pair, allPairs.length);
     }
 
     function setFeeTo(address _feeTo) external onlyG {
