@@ -144,13 +144,13 @@ contract Gauge is RewardBase {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
-    function deposit() external {
+    /*function deposit() external {
         _deposit(erc20(stake).balanceOf(msg.sender), msg.sender);
     }
 
     function deposit(uint amount) external {
         _deposit(amount, msg.sender);
-    }
+    }*/
 
     function deposit(uint amount, address account) external {
         _deposit(amount, account);
@@ -411,27 +411,6 @@ contract BaseV1Gauges {
 
     function length() external view returns (uint) {
         return _pools.length;
-    }
-
-    function distribute() external {
-        uint _balance = erc20(base).balanceOf(address(this));
-        if (_balance > 0 && totalWeight > 0) {
-            uint _totalWeight = totalWeight;
-            for (uint i = 0; i < _pools.length; i++) {
-                if (!enabled[_pools[i]]) {
-                    _totalWeight -= weights[_pools[i]];
-                }
-            }
-            for (uint x = 0; x < _pools.length; x++) {
-                if (enabled[_pools[x]]) {
-                    uint _reward = _balance * weights[_pools[x]] / _totalWeight;
-                    if (_reward > 0) {
-                        address _gauge = gauges[_pools[x]];
-                        Gauge(_gauge).notifyRewardAmount(base, _reward);
-                    }
-                }
-            }
-        }
     }
 
     function distribute(address token) external {

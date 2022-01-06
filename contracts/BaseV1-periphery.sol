@@ -18,6 +18,7 @@ interface IBaseV1Pair {
     function mint(address to) external returns (uint liquidity);
     function getReserves() external view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast);
     function getAmountOut(uint, address) external view returns (uint);
+    function quote(uint, uint, uint) external view returns (uint);
 }
 
 interface erc20 {
@@ -114,25 +115,55 @@ contract BaseV1Router01 {
         return IBaseV1Factory(factory).isPair(pair);
     }
 
+    function quoteAddLiquidity(uint amountA, uint reserveA, uint reserveB) public pure returns (uint) {
+        return amountA * reserveB / reserveA;
+    }
+
+    function _addLiquidity(
+        address tokenA,
+        address tokenB,
+        uint amountADesired,
+        uint amountBDesired,
+        uint amountAMin,
+        uint amountBMin
+    ) internal virtual returns (uint amountA, uint amountB) {
+        // create the pair if it doesn't exist yet
+        address _pair = IBaseV1Factory(factory).getPair(tokenA, tokenB);
+        if (_pair == address(0)) {
+            _pair = IBaseV1Factory(factory).createPair(tokenA, tokenB);
+        }
+        (uint reserveA, uint reserveB) = getReserves(tokenA, tokenB);
+        if (reserveA == 0 && reserveB == 0) {
+            (amountA, amountB) = (amountADesired, amountBDesired);
+        } else {
+            uint amountBOptimal = quoteAddLiquidity(amountADesired, reserveA, reserveB);
+            if (amountBOptimal <= amountBDesired) {
+                require(amountBOptimal >= amountBMin, 'BaseV1Router: INSUFFICIENT_B_AMOUNT');
+                (amountA, amountB) = (amountADesired, amountBOptimal);
+            } else {
+                uint amountAOptimal = quoteAddLiquidity(amountBDesired, reserveB, reserveA);
+                assert(amountAOptimal <= amountADesired);
+                require(amountAOptimal >= amountAMin, 'BaseV1Router: INSUFFICIENT_A_AMOUNT');
+                (amountA, amountB) = (amountAOptimal, amountBDesired);
+            }
+        }
+    }
+
     function addLiquidity(
         address tokenA,
         address tokenB,
         uint amountADesired,
         uint amountBDesired,
-        uint minLiquidity,
+        uint amountAMin,
+        uint amountBMin,
         address to,
         uint deadline
     ) external ensure(deadline) returns (uint amountA, uint amountB, uint liquidity) {
-        if (IBaseV1Factory(factory).getPair(tokenA, tokenB) == address(0)) {
-            IBaseV1Factory(factory).createPair(tokenA, tokenB);
-        }
-        (amountA, amountB) = (amountADesired, amountBDesired);
+        (amountA, amountB) = _addLiquidity(tokenA, tokenB, amountADesired, amountBDesired, amountAMin, amountBMin);
         address pair = pairFor(tokenA, tokenB);
         _safeTransferFrom(tokenA, msg.sender, pair, amountA);
         _safeTransferFrom(tokenB, msg.sender, pair, amountB);
         liquidity = IBaseV1Pair(pair).mint(to);
-
-        require(liquidity >= minLiquidity, '< _min_liquidity');
     }
 
     // **** REMOVE LIQUIDITY ****
