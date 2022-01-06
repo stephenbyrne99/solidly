@@ -1,5 +1,7 @@
 # solidswap
 
+![alt text](solid.png)
+
 Solid swap protocol allows low cost, near 0 slippage trades on uncorrelated or tightly correlated assets. Gas used is ~100k. The protocol incentivizes fees instead of liquidity. Liquidity providers (LPs) are given incentives in the form of `token`, the amount received is calculated as follows;
 
 * 40% of weekly distribution weighted on fees accrued for the protocol as a function of feeShare / totalFees
