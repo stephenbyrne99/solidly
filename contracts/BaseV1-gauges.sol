@@ -427,7 +427,7 @@ contract BaseV1Gauges {
                     uint _reward = _balance * weights[_pools[x]] / _totalWeight;
                     if (_reward > 0) {
                         address _gauge = gauges[_pools[x]];
-                        Gauge(_gauge).notifyRewardAmount(base, _reward);
+                        Gauge(_gauge).notifyRewardAmount(token, _reward);
                     }
                 }
             }
