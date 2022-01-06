@@ -14,6 +14,7 @@ interface VotingEscrow:
     def user_point_history(addr: address, loc: uint256) -> Point: view
     def point_history(loc: uint256) -> Point: view
     def checkpoint(): nonpayable
+    def deposit_for(_addr: address, _value: uint256): nonpayable
 
 
 event CommitAdmin:
@@ -93,6 +94,7 @@ def __init__(
     self.voting_escrow = _voting_escrow
     self.admin = _admin
     self.emergency_return = _emergency_return
+    ERC20(_token).approve(_voting_escrow, MAX_UINT256)
 
 
 @internal
@@ -400,7 +402,7 @@ def claim(_addr: address = msg.sender) -> uint256:
     amount: uint256 = self._claim(_addr, self.voting_escrow, last_token_time)
     if amount != 0:
         token: address = self.token
-        assert ERC20(token).transfer(_addr, amount)
+        VotingEscrow(self.voting_escrow).deposit_for(_addr, amount)
         self.token_last_balance -= amount
 
     return amount
