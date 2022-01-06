@@ -1,4 +1,4 @@
-# @version 0.2.15
+# @version 0.3.1
 """
 @title Voting Escrow
 @author Curve Finance
@@ -43,20 +43,10 @@ interface ERC20:
     def transfer(to: address, amount: uint256) -> bool: nonpayable
     def transferFrom(spender: address, to: address, amount: uint256) -> bool: nonpayable
 
-
-# Interface for checking whether address belongs to a whitelisted
-# type of a smart wallet.
-# When new types are added - the whole contract is changed
-# The check() method is modifying to be able to use caching
-# for individual wallet addresses
-interface SmartWalletChecker:
-    def check(addr: address) -> bool: nonpayable
-
 DEPOSIT_FOR_TYPE: constant(int128) = 0
 CREATE_LOCK_TYPE: constant(int128) = 1
 INCREASE_LOCK_AMOUNT: constant(int128) = 2
 INCREASE_UNLOCK_TIME: constant(int128) = 3
-
 
 event CommitOwnership:
     admin: address
@@ -422,7 +412,6 @@ def increase_amount(_value: uint256):
             without modifying the unlock time
     @param _value Amount of tokens to deposit and add to the lock
     """
-    self.assert_not_contract(msg.sender)
     _locked: LockedBalance = self.locked[msg.sender]
 
     assert _value > 0  # dev: need non-zero value
@@ -439,7 +428,6 @@ def increase_unlock_time(_unlock_time: uint256):
     @notice Extend the unlock time for `msg.sender` to `_unlock_time`
     @param _unlock_time New epoch time for unlocking
     """
-    self.assert_not_contract(msg.sender)
     _locked: LockedBalance = self.locked[msg.sender]
     unlock_time: uint256 = (_unlock_time / WEEK) * WEEK  # Locktime is rounded down to weeks
 
