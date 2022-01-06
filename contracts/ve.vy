@@ -22,6 +22,48 @@
 # 0 +--------+------> time
 #       maxtime (4 years?)
 
+from vyper.interfaces import ERC721
+
+implements: ERC721
+
+# Interface for the contract called by safeTransferFrom()
+interface ERC721Receiver:
+    def onERC721Received(
+            _operator: address,
+            _from: address,
+            _tokenId: uint256,
+            _data: Bytes[1024]
+        ) -> bytes32: view
+# Interface for ERC721Metadata
+
+interface ERC721Metadata:
+    def name(
+            _name: String[64]
+        ) -> String[64]: view
+
+    def symbol(
+            _symbol: String[32]
+        ) -> String[32]: view
+
+    def tokenURI(
+            _tokenId: uint256
+        ) -> String[128]: view
+
+# Interface for ERC721Enumerable
+
+interface ERC721Enumerable:
+
+    def totalSupply() -> uint256: view
+
+    def tokenByIndex(
+        _tokenId: uint256
+    ) -> uint256: view
+
+    def tokenOfOwnerByIndex(
+        _owner: address,
+        _tokenId: uint256
+    ) -> uint256: view
+
 struct Point:
     bias: int128
     slope: int128  # - dweight / dt
@@ -48,14 +90,9 @@ CREATE_LOCK_TYPE: constant(int128) = 1
 INCREASE_LOCK_AMOUNT: constant(int128) = 2
 INCREASE_UNLOCK_TIME: constant(int128) = 3
 
-event CommitOwnership:
-    admin: address
-
-event ApplyOwnership:
-    admin: address
-
 event Deposit:
     provider: indexed(address)
+    tokenId: uint256
     value: uint256
     locktime: indexed(uint256)
     type: int128
@@ -63,6 +100,7 @@ event Deposit:
 
 event Withdraw:
     provider: indexed(address)
+    tokenId: uint256
     value: uint256
     ts: uint256
 
@@ -70,38 +108,54 @@ event Supply:
     prevSupply: uint256
     supply: uint256
 
-event NewDelegation:
-    delegator: indexed(address)
-    gauge: indexed(address)
+# @dev Emits when ownership of any NFT changes by any mechanism. This event emits when NFTs are
+#      created (`from` == 0) and destroyed (`to` == 0). Exception: during contract creation, any
+#      number of NFTs may be created and assigned without emitting Transfer. At the time of any
+#      transfer, the approved address for that NFT (if any) is reset to none.
+# @param _from Sender of NFT (if address is zero address it indicates token creation).
+# @param _to Receiver of NFT (if address is zero address it indicates token destruction).
+# @param _tokenId The NFT that got transfered.
+event Transfer:
+    sender: indexed(address)
     receiver: indexed(address)
-    pct: uint256
-    cancel_time: uint256
-    expire_time: uint256
+    tokenId: indexed(uint256)
 
-event CancelledDelegation:
-    delegator: indexed(address)
-    gauge: indexed(address)
-    receiver: indexed(address)
-    cancelled_by: address
+# @dev This emits when the approved address for an NFT is changed or reaffirmed. The zero
+#      address indicates there is no approved address. When a Transfer event emits, this also
+#      indicates that the approved address for that NFT (if any) is reset to none.
+# @param _owner Owner of NFT.
+# @param _approved Address that we are approving.
+# @param _tokenId NFT which we are approving.
+event Approval:
+    owner: indexed(address)
+    approved: indexed(address)
+    tokenId: indexed(uint256)
 
-struct ReceivedBoost:
-    length: uint256
-    data: uint256[10]
-
+# @dev This emits when an operator is enabled or disabled for an owner. The operator can manage
+#      all NFTs of the owner.
+# @param _owner Owner of NFT.
+# @param _operator Address to which we are setting operator rights.
+# @param _approved Status of operator rights(true if operator rights are given and false if
+# revoked).
+event ApprovalForAll:
+    owner: indexed(address)
+    operator: indexed(address)
+    approved: bool
 
 WEEK: constant(uint256) = 7 * 86400  # all future times are rounded by week
 MAXTIME: constant(uint256) = 4 * 365 * 86400  # 4 years
 MULTIPLIER: constant(uint256) = 10 ** 18
+MAX_LOCKS: constant(int128) = 1024
 
 token: public(address)
 supply: public(uint256)
 
-locked: public(HashMap[address, LockedBalance])
+locked: public(HashMap[uint256, LockedBalance])
 
 epoch: public(uint256)
 point_history: public(Point[100000000000000000000000000000])  # epoch -> unsigned point
-user_point_history: public(HashMap[address, Point[1000000000]])  # user -> Point[user_epoch]
-user_point_epoch: public(HashMap[address, uint256])
+user_point_history: public(HashMap[uint256, Point[1000000000]])  # user -> Point[user_epoch]
+user_point_epoch: public(HashMap[uint256, uint256])
 slope_changes: public(HashMap[uint256, int128])  # time -> signed slope change
 
 name: public(String[64])
@@ -109,23 +163,47 @@ symbol: public(String[32])
 version: public(String[32])
 decimals: public(uint256)
 
-admin: public(address)  # Can and will be a smart contract
-future_admin: public(address)
-
-# user -> number of active boost delegations
-delegation_count: public(HashMap[address, uint256])
-
-# user -> gauge -> data on boosts delegated to user
-# tightly packed as [address][uint16 pct][uint40 cancel time][uint40 expire time]
-delegation_data: HashMap[address, HashMap[address, ReceivedBoost]]
-
-# user -> gauge -> data about delegation user has made for this gauge
-delegated_to: HashMap[address, HashMap[address, uint256]]
-
-operator_of: public(HashMap[address, address])
-
 MIN_VE: constant(uint256) = 2500 * 10**18
 
+# @dev Current count of token
+tokenId: uint256
+
+# @dev Mapping from NFT ID to the address that owns it.
+idToOwner: HashMap[uint256, address]
+
+# @dev Mapping from NFT ID to approved address.
+idToApprovals: HashMap[uint256, address]
+
+# @dev Mapping from owner address to count of his tokens.
+ownerToNFTokenCount: HashMap[address, uint256]
+
+# @dev Mapping from owner address to mapping of index to tokenIds
+ownerToNFTokenIdList: HashMap[address, HashMap[uint256, uint256]]
+
+# @dev Mapping from NFT ID to index of owner
+tokenToOwnerIndex: HashMap[uint256, uint256]
+
+# @dev Mapping from owner address to mapping of operator addresses.
+ownerToOperators: HashMap[address, HashMap[address, bool]]
+
+# @dev Address of URI contract
+tokenBaseURI: public(String[128])
+
+# @dev Mapping of interface id to bool about whether or not it's supported
+supportedInterfaces: HashMap[bytes32, bool]
+
+# @dev ERC165 interface ID of ERC165
+ERC165_INTERFACE_ID: constant(bytes32) = 0x0000000000000000000000000000000000000000000000000000000001ffc9a7
+
+# @dev ERC165 interface ID of ERC721
+ERC721_INTERFACE_ID: constant(bytes32) = 0x0000000000000000000000000000000000000000000000000000000080ac58cd
+
+# @dev ERC165 interface ID of ERC721Metadata
+ERC721_METADATA_INTERFACE_ID: constant(bytes32) = 0x000000000000000000000000000000000000000000000000000000005b5e139f
+
+# @dev ERC165 interface ID of ERC721Enumerable
+
+ERC721_ENUMERABLE_INTERFACE_ID: constant(bytes32) = 0x00000000000000000000000000000000000000000000000000000000780e9d63
 
 @external
 def __init__(token_addr: address, _name: String[64], _symbol: String[32], _version: String[32]):
@@ -136,7 +214,6 @@ def __init__(token_addr: address, _name: String[64], _symbol: String[32], _versi
     @param _symbol Token symbol
     @param _version Contract version - required for Aragon compatibility
     """
-    self.admin = msg.sender
     self.token = token_addr
     self.point_history[0].blk = block.number
     self.point_history[0].ts = block.timestamp
@@ -149,70 +226,371 @@ def __init__(token_addr: address, _name: String[64], _symbol: String[32], _versi
     self.symbol = _symbol
     self.version = _version
 
+    self.supportedInterfaces[ERC165_INTERFACE_ID] = True
+    self.supportedInterfaces[ERC721_INTERFACE_ID] = True
+    self.supportedInterfaces[ERC721_METADATA_INTERFACE_ID] = True
+    self.supportedInterfaces[ERC721_ENUMERABLE_INTERFACE_ID] = True
+    self.tokenId = 0
 
+    log Transfer(ZERO_ADDRESS, msg.sender, 0)
+
+@view
 @external
-def commit_transfer_ownership(addr: address):
+def supportsInterface(_interfaceID: bytes32) -> bool:
     """
-    @notice Transfer ownership of VotingEscrow contract to `addr`
-    @param addr Address to have ownership transferred to
+    @dev Interface identification is specified in ERC-165.
+    @param _interfaceID Id of the interface
     """
-    assert msg.sender == self.admin  # dev: admin only
-    self.future_admin = addr
-    log CommitOwnership(addr)
-
-
-@external
-def apply_transfer_ownership():
-    """
-    @notice Apply ownership transfer
-    """
-    assert msg.sender == self.admin  # dev: admin only
-    _admin: address = self.future_admin
-    assert _admin != ZERO_ADDRESS  # dev: admin not set
-    self.admin = _admin
-    log ApplyOwnership(_admin)
-
+    return self.supportedInterfaces[_interfaceID]
 
 @external
 @view
-def get_last_user_slope(addr: address) -> int128:
+def get_last_user_slope(_tokenId: uint256) -> int128:
     """
-    @notice Get the most recently recorded rate of voting power decrease for `addr`
-    @param addr Address of the user wallet
+    @notice Get the most recently recorded rate of voting power decrease for `_tokenId`
+    @param _tokenId token of the NFT
     @return Value of the slope
     """
-    uepoch: uint256 = self.user_point_epoch[addr]
-    return self.user_point_history[addr][uepoch].slope
-
+    uepoch: uint256 = self.user_point_epoch[_tokenId]
+    return self.user_point_history[_tokenId][uepoch].slope
 
 @external
 @view
-def user_point_history__ts(_addr: address, _idx: uint256) -> uint256:
+def user_point_history__ts(_tokenId: uint256, _idx: uint256) -> uint256:
     """
-    @notice Get the timestamp for checkpoint `_idx` for `_addr`
-    @param _addr User wallet address
+    @notice Get the timestamp for checkpoint `_idx` for `_tokenId`
+    @param _tokenId token of the NFT
     @param _idx User epoch number
     @return Epoch time of the checkpoint
     """
-    return self.user_point_history[_addr][_idx].ts
-
+    return self.user_point_history[_tokenId][_idx].ts
 
 @external
 @view
-def locked__end(_addr: address) -> uint256:
+def locked__end(_tokenId: uint256) -> uint256:
     """
-    @notice Get timestamp when `_addr`'s lock finishes
-    @param _addr User wallet
+    @notice Get timestamp when `_tokenId`'s lock finishes
+    @param _tokenId User NFT
     @return Epoch time of the lock end
     """
-    return self.locked[_addr].end
+    return self.locked[_tokenId].end
+
+@view
+@external
+def balanceOf(_owner: address) -> uint256:
+    """
+    @dev Returns the number of NFTs owned by `_owner`.
+         Throws if `_owner` is the zero address. NFTs assigned to the zero address are considered invalid.
+    @param _owner Address for whom to query the balance.
+    """
+    return self.ownerToNFTokenCount[_owner]
+
+@view
+@external
+def ownerOf(_tokenId: uint256) -> address:
+    """
+    @dev Returns the address of the owner of the NFT.
+         Throws if `_tokenId` is not a valid NFT.
+    @param _tokenId The identifier for an NFT.
+    """
+    owner: address = self.idToOwner[_tokenId]
+    # Throws if `_tokenId` is not a valid NFT
+    assert owner != ZERO_ADDRESS
+    return owner
+
+
+@view
+@external
+def getApproved(_tokenId: uint256) -> address:
+    """
+    @dev Get the approved address for a single NFT.
+         Throws if `_tokenId` is not a valid NFT.
+    @param _tokenId ID of the NFT to query the approval of.
+    """
+    # Throws if `_tokenId` is not a valid NFT
+    assert self.idToOwner[_tokenId] != ZERO_ADDRESS
+    return self.idToApprovals[_tokenId]
+
+
+@view
+@external
+def isApprovedForAll(_owner: address, _operator: address) -> bool:
+    """
+    @dev Checks if `_operator` is an approved operator for `_owner`.
+    @param _owner The address that owns the NFTs.
+    @param _operator The address that acts on behalf of the owner.
+    """
+    return (self.ownerToOperators[_owner])[_operator]
+
+@view
+@external
+def tokenURI(_tokenId: uint256) -> String[128]:
+    """
+    @dev Returns current token URI metadata
+    @param _tokenId Token ID to fetch URI for.
+    """
+    return self.tokenBaseURI
+
+@view
+@external
+def tokenByIndex(_tokenId: uint256) -> uint256:
+    """
+    @dev  Get token by index
+          Throws if '_tokenId' is larger than totalSupply()
+    """
+    assert _tokenId <= self.tokenId
+
+    return self.tokenId
+
+@view
+@external
+def tokenOfOwnerByIndex(_owner: address, _tokenIndex: uint256) -> uint256:
+    """
+    @dev  Get token by index
+    """
+    assert _tokenIndex <= self._balanceOf(_owner)
+    return self.ownerToNFTokenIdList[_owner][_tokenIndex]
+
+### TRANSFER FUNCTION HELPERS ###
+
+@view
+@internal
+def _isApprovedOrOwner(_spender: address, _tokenId: uint256) -> bool:
+    """
+    @dev Returns whether the given spender can transfer a given token ID
+    @param spender address of the spender to query
+    @param tokenId uint256 ID of the token to be transferred
+    @return bool whether the msg.sender is approved for the given token ID,
+        is an operator of the owner, or is the owner of the token
+    """
+    owner: address = self.idToOwner[_tokenId]
+    spenderIsOwner: bool = owner == _spender
+    spenderIsApproved: bool = _spender == self.idToApprovals[_tokenId]
+    spenderIsApprovedForAll: bool = (self.ownerToOperators[owner])[_spender]
+    return (spenderIsOwner or spenderIsApproved) or spenderIsApprovedForAll
+
+@internal
+def _addTokenToOwnerList(_to: address, _tokenId: uint256):
+    """
+    @dev Add a NFT to an index mapping to a given address
+    @param to address of the receiver
+    @param tokenId uint256 ID Of the token to be added
+    """
+    current_count: uint256 = self._balanceOf(_to)
+
+    self.ownerToNFTokenIdList[_to][current_count] = _tokenId
+    self.tokenToOwnerIndex[_tokenId] = current_count
+
+@internal
+def _removeTokenFromOwnerList(_from: address, _tokenId: uint256):
+    """
+    @dev Remove a NFT from an index mapping to a given address
+    @param from address of the sender
+    @param tokenId uint256 ID Of the token to be removed
+    """
+    # Delete
+    current_count: uint256 = self._balanceOf(_from)
+    current_index: uint256 = self.tokenToOwnerIndex[_tokenId]
+
+    if current_count == current_index:
+        # update ownerToNFTokenIdList
+        self.ownerToNFTokenIdList[_from][current_count] = 0
+        # update tokenToOwnerIndex
+        self.tokenToOwnerIndex[_tokenId] = 0
+
+    else:
+        lastTokenId: uint256 = self.ownerToNFTokenIdList[_from][current_count]
+
+        # Add
+        # update ownerToNFTokenIdList
+        self.ownerToNFTokenIdList[_from][current_index] = lastTokenId
+        # update tokenToOwnerIndex
+        self.tokenToOwnerIndex[lastTokenId] = current_index
+
+        # Delete
+        # update ownerToNFTokenIdList
+        self.ownerToNFTokenIdList[_from][current_count] = 0
+        # update tokenToOwnerIndex
+        self.tokenToOwnerIndex[_tokenId] = 0
+
+@internal
+def _addTokenTo(_to: address, _tokenId: uint256):
+    """
+    @dev Add a NFT to a given address
+         Throws if `_tokenId` is owned by someone.
+    """
+    # Throws if `_tokenId` is owned by someone
+    assert self.idToOwner[_tokenId] == ZERO_ADDRESS
+    # Change the owner
+    self.idToOwner[_tokenId] = _to
+    # Change count tracking
+    self.ownerToNFTokenCount[_to] += 1
+    # Update owner token index tracking
+    self._addTokenToOwnerList(_to, _tokenId)
 
 
 @internal
-def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBalance):
+def _removeTokenFrom(_from: address, _tokenId: uint256):
+    """
+    @dev Remove a NFT from a given address
+         Throws if `_from` is not the current owner.
+    """
+    # Throws if `_from` is not the current owner
+    assert self.idToOwner[_tokenId] == _from
+    # Change the owner
+    self.idToOwner[_tokenId] = ZERO_ADDRESS
+    # Update owner token index tracking
+    self._removeTokenFromOwnerList(_from, _tokenId)
+    # Change count tracking
+    self.ownerToNFTokenCount[_from] -= 1
+
+
+@internal
+def _clearApproval(_owner: address, _tokenId: uint256):
+    """
+    @dev Clear an approval of a given address
+         Throws if `_owner` is not the current owner.
+    """
+    # Throws if `_owner` is not the current owner
+    assert self.idToOwner[_tokenId] == _owner
+    if self.idToApprovals[_tokenId] != ZERO_ADDRESS:
+        # Reset approvals
+        self.idToApprovals[_tokenId] = ZERO_ADDRESS
+
+
+@internal
+def _transferFrom(_from: address, _to: address, _tokenId: uint256, _sender: address):
+    """
+    @dev Exeute transfer of a NFT.
+         Throws unless `msg.sender` is the current owner, an authorized operator, or the approved
+         address for this NFT. (NOTE: `msg.sender` not allowed in private function so pass `_sender`.)
+         Throws if `_to` is the zero address.
+         Throws if `_from` is not the current owner.
+         Throws if `_tokenId` is not a valid NFT.
+    """
+    # Check requirements
+    assert self._isApprovedOrOwner(_sender, _tokenId)
+    # Throws if `_to` is the zero address
+    assert _to != ZERO_ADDRESS
+    # Clear approval. Throws if `_from` is not the current owner
+    self._clearApproval(_from, _tokenId)
+    # Remove NFT. Throws if `_tokenId` is not a valid NFT
+    self._removeTokenFrom(_from, _tokenId)
+    # Add NFT
+    self._addTokenTo(_to, _tokenId)
+    # Log the transfer
+    log Transfer(_from, _to, _tokenId)
+
+
+### TRANSFER FUNCTIONS ###
+
+@external
+def transferFrom(_from: address, _to: address, _tokenId: uint256):
+    """
+    @dev Throws unless `msg.sender` is the current owner, an authorized operator, or the approved
+         address for this NFT.
+         Throws if `_from` is not the current owner.
+         Throws if `_to` is the zero address.
+         Throws if `_tokenId` is not a valid NFT.
+    @notice The caller is responsible to confirm that `_to` is capable of receiving NFTs or else
+            they maybe be permanently lost.
+    @param _from The current owner of the NFT.
+    @param _to The new owner.
+    @param _tokenId The NFT to transfer.
+    """
+    self._transferFrom(_from, _to, _tokenId, msg.sender)
+
+
+@external
+def safeTransferFrom(
+        _from: address,
+        _to: address,
+        _tokenId: uint256,
+        _data: Bytes[1024]=b""
+    ):
+    """
+    @dev Transfers the ownership of an NFT from one address to another address.
+         Throws unless `msg.sender` is the current owner, an authorized operator, or the
+         approved address for this NFT.
+         Throws if `_from` is not the current owner.
+         Throws if `_to` is the zero address.
+         Throws if `_tokenId` is not a valid NFT.
+         If `_to` is a smart contract, it calls `onERC721Received` on `_to` and throws if
+         the return value is not `bytes4(keccak256("onERC721Received(address,address,uint256,bytes)"))`.
+         NOTE: bytes4 is represented by bytes32 with padding
+    @param _from The current owner of the NFT.
+    @param _to The new owner.
+    @param _tokenId The NFT to transfer.
+    @param _data Additional data with no specified format, sent in call to `_to`.
+    """
+    self._transferFrom(_from, _to, _tokenId, msg.sender)
+    if _to.is_contract: # check if `_to` is a contract address
+        returnValue: bytes32 = ERC721Receiver(_to).onERC721Received(msg.sender, _from, _tokenId, _data)
+        # Throws if transfer destination is a contract which does not implement 'onERC721Received'
+        assert returnValue == method_id("onERC721Received(address,address,uint256,bytes)", output_type=bytes32)
+
+
+@external
+def approve(_approved: address, _tokenId: uint256):
+    """
+    @dev Set or reaffirm the approved address for an NFT. The zero address indicates there is no approved address.
+         Throws unless `msg.sender` is the current NFT owner, or an authorized operator of the current owner.
+         Throws if `_tokenId` is not a valid NFT. (NOTE: This is not written the EIP)
+         Throws if `_approved` is the current owner. (NOTE: This is not written the EIP)
+    @param _approved Address to be approved for the given NFT ID.
+    @param _tokenId ID of the token to be approved.
+    """
+    owner: address = self.idToOwner[_tokenId]
+    # Throws if `_tokenId` is not a valid NFT
+    assert owner != ZERO_ADDRESS
+    # Throws if `_approved` is the current owner
+    assert _approved != owner
+    # Check requirements
+    senderIsOwner: bool = self.idToOwner[_tokenId] == msg.sender
+    senderIsApprovedForAll: bool = (self.ownerToOperators[owner])[msg.sender]
+    assert (senderIsOwner or senderIsApprovedForAll)
+    # Set the approval
+    self.idToApprovals[_tokenId] = _approved
+    log Approval(owner, _approved, _tokenId)
+
+
+@external
+def setApprovalForAll(_operator: address, _approved: bool):
+    """
+    @dev Enables or disables approval for a third party ("operator") to manage all of
+         `msg.sender`'s assets. It also emits the ApprovalForAll event.
+         Throws if `_operator` is the `msg.sender`. (NOTE: This is not written the EIP)
+    @notice This works even if sender doesn't own any tokens at the time.
+    @param _operator Address to add to the set of authorized operators.
+    @param _approved True if the operators is approved, false to revoke approval.
+    """
+    # Throws if `_operator` is the `msg.sender`
+    assert _operator != msg.sender
+    self.ownerToOperators[msg.sender][_operator] = _approved
+    log ApprovalForAll(msg.sender, _operator, _approved)
+
+@internal
+def _mint(_to: address, _tokenId: uint256) -> bool:
+    """
+    @dev Function to mint tokens
+         Throws if `_to` is zero address.
+         Throws if `_tokenId` is owned by someone.
+    @param _to The address that will receive the minted tokens.
+    @param _tokenId The token id to mint.
+    @return A boolean that indicates if the operation was successful.
+    """
+    # Throws if `_to` is zero address
+    assert _to != ZERO_ADDRESS
+    # Add NFT. Throws if `_tokenId` is owned by someone
+    self._addTokenTo(_to, _tokenId)
+    log Transfer(ZERO_ADDRESS, _to, _tokenId)
+    return True
+
+@internal
+def _checkpoint(_tokenId: uint256, old_locked: LockedBalance, new_locked: LockedBalance):
     """
     @notice Record global and per-user data to checkpoint
-    @param addr User's wallet address. No user checkpoint if 0x0
+    @param _tokenId NFT token ID. No user checkpoint if 0
     @param old_locked Pevious locked amount / end lock time for the user
     @param new_locked New locked amount / end lock time for the user
     """
@@ -222,7 +600,7 @@ def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBala
     new_dslope: int128 = 0
     _epoch: uint256 = self.epoch
 
-    if addr != ZERO_ADDRESS:
+    if _tokenId != 0:
         # Calculate slopes and biases
         # Kept at zero when they have to
         if old_locked.end > block.timestamp and old_locked.amount > 0:
@@ -286,7 +664,7 @@ def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBala
     self.epoch = _epoch
     # Now point_history is filled until t=now
 
-    if addr != ZERO_ADDRESS:
+    if _tokenId != 0:
         # If last point was in this block, the slope change has been applied already
         # But in such case we have 0 slope(s)
         last_point.slope += (u_new.slope - u_old.slope)
@@ -299,7 +677,7 @@ def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBala
     # Record the changed point into history
     self.point_history[_epoch] = last_point
 
-    if addr != ZERO_ADDRESS:
+    if _tokenId != 0:
         # Schedule the slope changes (slope is going down)
         # We subtract new_user_slope from [new_locked.end]
         # and add old_user_slope to [old_locked.end]
@@ -317,19 +695,19 @@ def _checkpoint(addr: address, old_locked: LockedBalance, new_locked: LockedBala
             # else: we recorded it already in old_dslope
 
         # Now handle user history
-        user_epoch: uint256 = self.user_point_epoch[addr] + 1
+        user_epoch: uint256 = self.user_point_epoch[_tokenId] + 1
 
-        self.user_point_epoch[addr] = user_epoch
+        self.user_point_epoch[_tokenId] = user_epoch
         u_new.ts = block.timestamp
         u_new.blk = block.number
-        self.user_point_history[addr][user_epoch] = u_new
+        self.user_point_history[_tokenId][user_epoch] = u_new
 
 
 @internal
-def _deposit_for(_from: address, _addr: address, _value: uint256, unlock_time: uint256, locked_balance: LockedBalance, type: int128):
+def _deposit_for(_from: address, _tokenId: uint256, _value: uint256, unlock_time: uint256, locked_balance: LockedBalance, type: int128):
     """
     @notice Deposit and lock tokens for a user
-    @param _addr User's wallet address
+    @param _tokenId NFT that holds lock
     @param _value Amount to deposit
     @param unlock_time New time when to unlock the tokens, or 0 if unchanged
     @param locked_balance Previous locked amount / timestamp
@@ -343,18 +721,18 @@ def _deposit_for(_from: address, _addr: address, _value: uint256, unlock_time: u
     _locked.amount += convert(_value, int128)
     if unlock_time != 0:
         _locked.end = unlock_time
-    self.locked[_addr] = _locked
+    self.locked[_tokenId] = _locked
 
     # Possibilities:
     # Both old_locked.end could be current or expired (>/< block.timestamp)
     # value == 0 (extend lock) or value > 0 (add to lock or extend lock)
     # _locked.end > block.timestamp (always)
-    self._checkpoint(_addr, old_locked, _locked)
+    self._checkpoint(_tokenId, old_locked, _locked)
 
     if _value != 0:
         assert ERC20(self.token).transferFrom(_from, self, _value)
 
-    log Deposit(_addr, _value, _locked.end, type, block.timestamp)
+    log Deposit(_from, _tokenId, _value, _locked.end, type, block.timestamp)
     log Supply(supply_before, supply_before + _value)
 
 
@@ -363,26 +741,26 @@ def checkpoint():
     """
     @notice Record global data to checkpoint
     """
-    self._checkpoint(ZERO_ADDRESS, empty(LockedBalance), empty(LockedBalance))
+    self._checkpoint(0, empty(LockedBalance), empty(LockedBalance))
 
 
 @external
 @nonreentrant('lock')
-def deposit_for(_addr: address, _value: uint256):
+def deposit_for(_tokenId: uint256, _value: uint256):
     """
-    @notice Deposit `_value` tokens for `_addr` and add to the lock
+    @notice Deposit `_value` tokens for `_tokenId` and add to the lock
     @dev Anyone (even a smart contract) can deposit for someone else, but
          cannot extend their locktime and deposit for a brand new user
-    @param _addr User's wallet address
+    @param _tokenId lock NFT
     @param _value Amount to add to user's lock
     """
-    _locked: LockedBalance = self.locked[_addr]
+    _locked: LockedBalance = self.locked[_tokenId]
 
     assert _value > 0  # dev: need non-zero value
     assert _locked.amount > 0, "No existing lock found"
     assert _locked.end > block.timestamp, "Cannot add to expired lock. Withdraw"
 
-    self._deposit_for(msg.sender, _addr, _value, 0, self.locked[_addr], DEPOSIT_FOR_TYPE)
+    self._deposit_for(msg.sender, _tokenId, _value, 0, self.locked[_tokenId], DEPOSIT_FOR_TYPE)
 
 
 @external
@@ -394,41 +772,49 @@ def create_lock(_value: uint256, _unlock_time: uint256):
     @param _unlock_time Epoch time when tokens unlock, rounded down to whole weeks
     """
     unlock_time: uint256 = (_unlock_time / WEEK) * WEEK  # Locktime is rounded down to weeks
-    _locked: LockedBalance = self.locked[msg.sender]
 
     assert _value > 0  # dev: need non-zero value
-    assert _locked.amount == 0, "Withdraw old tokens first"
     assert unlock_time > block.timestamp, "Can only lock until time in the future"
     assert unlock_time <= block.timestamp + MAXTIME, "Voting lock can be 4 years max"
 
-    self._deposit_for(msg.sender, msg.sender, _value, unlock_time, _locked, CREATE_LOCK_TYPE)
+    self.tokenId += 1
+    _tokenId: uint256 = self.tokenId
+    self._addTokenTo(msg.sender, _tokenId)
+    log Transfer(ZERO_ADDRESS, msg.sender, _tokenId)
+    _locked: LockedBalance = self.locked[_tokenId]
+
+    self._deposit_for(msg.sender, _tokenId, _value, unlock_time, _locked, CREATE_LOCK_TYPE)
 
 
 @external
 @nonreentrant('lock')
-def increase_amount(_value: uint256):
+def increase_amount(_tokenId: uint256, _value: uint256):
     """
-    @notice Deposit `_value` additional tokens for `msg.sender`
+    @notice Deposit `_value` additional tokens for `_tokenId`
             without modifying the unlock time
     @param _value Amount of tokens to deposit and add to the lock
     """
-    _locked: LockedBalance = self.locked[msg.sender]
+    assert self._isApprovedOrOwner(msg.sender, _tokenId)
+
+    _locked: LockedBalance = self.locked[_tokenId]
 
     assert _value > 0  # dev: need non-zero value
     assert _locked.amount > 0, "No existing lock found"
     assert _locked.end > block.timestamp, "Cannot add to expired lock. Withdraw"
 
-    self._deposit_for(msg.sender, msg.sender, _value, 0, _locked, INCREASE_LOCK_AMOUNT)
+    self._deposit_for(msg.sender, _tokenId, _value, 0, _locked, INCREASE_LOCK_AMOUNT)
 
 
 @external
 @nonreentrant('lock')
-def increase_unlock_time(_unlock_time: uint256):
+def increase_unlock_time(_tokenId: uint256, _unlock_time: uint256):
     """
-    @notice Extend the unlock time for `msg.sender` to `_unlock_time`
+    @notice Extend the unlock time for `_tokenId` to `_unlock_time`
     @param _unlock_time New epoch time for unlocking
     """
-    _locked: LockedBalance = self.locked[msg.sender]
+    assert self._isApprovedOrOwner(msg.sender, _tokenId)
+
+    _locked: LockedBalance = self.locked[_tokenId]
     unlock_time: uint256 = (_unlock_time / WEEK) * WEEK  # Locktime is rounded down to weeks
 
     assert _locked.end > block.timestamp, "Lock expired"
@@ -436,35 +822,37 @@ def increase_unlock_time(_unlock_time: uint256):
     assert unlock_time > _locked.end, "Can only increase lock duration"
     assert unlock_time <= block.timestamp + MAXTIME, "Voting lock can be 4 years max"
 
-    self._deposit_for(msg.sender, msg.sender, 0, unlock_time, _locked, INCREASE_UNLOCK_TIME)
+    self._deposit_for(msg.sender, _tokenId, 0, unlock_time, _locked, INCREASE_UNLOCK_TIME)
 
 
 @external
 @nonreentrant('lock')
-def withdraw():
+def withdraw(_tokenId: uint256):
     """
-    @notice Withdraw all tokens for `msg.sender`
+    @notice Withdraw all tokens for `_tokenId`
     @dev Only possible if the lock has expired
     """
-    _locked: LockedBalance = self.locked[msg.sender]
+    assert self._isApprovedOrOwner(msg.sender, _tokenId)
+
+    _locked: LockedBalance = self.locked[_tokenId]
     assert block.timestamp >= _locked.end, "The lock didn't expire"
     value: uint256 = convert(_locked.amount, uint256)
 
     old_locked: LockedBalance = _locked
     _locked.end = 0
     _locked.amount = 0
-    self.locked[msg.sender] = _locked
+    self.locked[_tokenId] = _locked
     supply_before: uint256 = self.supply
     self.supply = supply_before - value
 
     # old_locked can have either expired <= timestamp or zero end
     # _locked has only 0 end
     # Both can have >= 0 amount
-    self._checkpoint(msg.sender, old_locked, _locked)
+    self._checkpoint(_tokenId, old_locked, _locked)
 
     assert ERC20(self.token).transfer(msg.sender, value)
 
-    log Withdraw(msg.sender, value, block.timestamp)
+    log Withdraw(msg.sender, _tokenId, value, block.timestamp)
     log Supply(supply_before, supply_before - value)
 
 
@@ -499,16 +887,36 @@ def find_block_epoch(_block: uint256, max_epoch: uint256) -> uint256:
 def _balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
     """
     @notice Get the current voting power for `msg.sender`
-    @dev Adheres to the ERC20 `balanceOf` interface for Aragon compatibility
     @param addr User wallet address
     @param _t Epoch time to return voting power at
     @return User voting power
     """
-    _epoch: uint256 = self.user_point_epoch[addr]
+    _count: uint256 = self.ownerToNFTokenCount[addr]
+    _start: uint256 = 0
+    _balance: uint256 = 0
+    for i in range(MAX_LOCKS):
+        if (i >= _count):
+            break
+
+        _tokenId: uint256 = self.ownerToNFTokenIdList[addr][i]
+        _balance += self._balanceOfNFT(_tokenId, _t)
+    return _balance
+
+@internal
+@view
+def _balanceOfNFT(_tokenId: uint256, _t: uint256 = block.timestamp) -> uint256:
+    """
+    @notice Get the current voting power for `_tokenId`
+    @dev Adheres to the ERC20 `balanceOf` interface for Aragon compatibility
+    @param _tokenId NFT for lock
+    @param _t Epoch time to return voting power at
+    @return User voting power
+    """
+    _epoch: uint256 = self.user_point_epoch[_tokenId]
     if _epoch == 0:
         return 0
     else:
-        last_point: Point = self.user_point_history[addr][_epoch]
+        last_point: Point = self.user_point_history[_tokenId][_epoch]
         last_point.bias -= last_point.slope * convert(_t - last_point.ts, int128)
         if last_point.bias < 0:
             last_point.bias = 0
@@ -516,7 +924,7 @@ def _balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
 
 @external
 @view
-def balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
+def balanceOfAtTime(addr: address, _t: uint256 = block.timestamp) -> uint256:
     """
     @notice Get the current voting power for `msg.sender`
     @dev Adheres to the ERC20 `balanceOf` interface for Aragon compatibility
@@ -529,10 +937,28 @@ def balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
 @external
 @view
 def balanceOfAt(addr: address, _block: uint256) -> uint256:
+    _count: uint256 = self.ownerToNFTokenCount[addr]
+    _balance: uint256 = 0
+    for i in range(MAX_LOCKS):
+        if (i >= _count):
+            break
+
+        _tokenId: uint256 = self.ownerToNFTokenIdList[addr][i]
+        _balance += self._balanceOfAtNFT(_tokenId, _block)
+    return _balance
+
+@external
+@view
+def balanceOfAtNFT(_tokenId: uint256, _block: uint256) -> uint256:
+    return self._balanceOfAtNFT(_tokenId, _block)
+
+@internal
+@view
+def _balanceOfAtNFT(_tokenId: uint256, _block: uint256) -> uint256:
     """
-    @notice Measure voting power of `addr` at block height `_block`
+    @notice Measure voting power of `_tokenId` at block height `_block`
     @dev Adheres to MiniMe `balanceOfAt` interface: https://github.com/Giveth/minime
-    @param addr User's wallet address
+    @param _tokenId User's wallet NFT
     @param _block Block to calculate the voting power at
     @return Voting power
     """
@@ -542,17 +968,17 @@ def balanceOfAt(addr: address, _block: uint256) -> uint256:
 
     # Binary search
     _min: uint256 = 0
-    _max: uint256 = self.user_point_epoch[addr]
+    _max: uint256 = self.user_point_epoch[_tokenId]
     for i in range(128):  # Will be always enough for 128-bit numbers
         if _min >= _max:
             break
         _mid: uint256 = (_min + _max + 1) / 2
-        if self.user_point_history[addr][_mid].blk <= _block:
+        if self.user_point_history[_tokenId][_mid].blk <= _block:
             _min = _mid
         else:
             _max = _mid - 1
 
-    upoint: Point = self.user_point_history[addr][_min]
+    upoint: Point = self.user_point_history[_tokenId][_min]
 
     max_epoch: uint256 = self.epoch
     _epoch: uint256 = self.find_block_epoch(_block, max_epoch)
@@ -643,247 +1069,3 @@ def totalSupplyAt(_block: uint256) -> uint256:
     # Now dt contains info on how far are we beyond point
 
     return self.supply_at(point, point.ts + dt)
-
-
-@view
-@external
-def get_delegated_to(_delegator: address, _gauge: address) -> (address, uint256, uint256, uint256):
-    """
-    @notice Get data about an accounts's boost delegation
-    @param _delegator Address to query delegation data for
-    @param _gauge Gauge address to query. Use ZERO_ADDRESS for global delegation.
-    @return address receiving the delegated boost
-            delegated boost pct (out of 10000)
-            cancellable timestamp
-            expiry timestamp
-    """
-    data: uint256 = self.delegated_to[_delegator][_gauge]
-    return (
-        convert(shift(data, 96), address),
-        shift(data, 80) % 2**16,
-        shift(data, 40) % 2**40,
-        data % 2**40
-    )
-
-
-@view
-@external
-def get_delegation_data(
-    _receiver: address,
-    _gauge: address,
-    _idx: uint256
-) -> (address, uint256, uint256, uint256):
-    """
-    @notice Get data delegation toward an account
-    @param _receiver Address to query delegation data for
-    @param _gauge Gauge address to query. Use ZERO_ADDRESS for global delegation.
-    @param _idx Data index. Each account can receive a max of 10 delegations per pool.
-    @return address of the delegator
-            delegated boost pct (out of 10000)
-            cancellable timestamp
-            expiry timestamp
-    """
-    data: uint256 = self.delegation_data[_receiver][_gauge].data[_idx]
-    return (
-        convert(shift(data, 96), address),
-        shift(data, 80) % 2**16,
-        shift(data, 40) % 2**40,
-        data % 2**40
-    )
-
-
-@external
-def set_operator(_operator: address) -> bool:
-    """
-    @notice Set the authorized operator for an address
-    @dev An operator can delegate boost, including creating delegations that
-         cannot be cancelled. This permission should only be given to trusted
-         3rd parties and smart contracts where the contract behavior is known
-         to be not malicious.
-    @param _operator Approved operator address. Set to `ZERO_ADDRESS` to revoke
-                     the currently active approval.
-    @return bool success
-    """
-    self.operator_of[msg.sender] = _operator
-    return True
-
-
-@internal
-def _delete_delegation_data(_delegator: address, _gauge: address, _delegation_data: uint256):
-    # delete record for the delegator
-    self.delegated_to[_delegator][_gauge] = 0
-    self.delegation_count[_delegator] -= 1
-
-    receiver: address = convert(shift(_delegation_data, 96), address)
-    length: uint256 = self.delegation_data[receiver][_gauge].length
-
-    # delete record for the receiver
-    for i in range(10):
-        if i == length - 1:
-            self.delegation_data[receiver][_gauge].data[i] = 0
-            break
-        if self.delegation_data[receiver][_gauge].data[i] == _delegation_data:
-            self.delegation_data[receiver][_gauge].data[i] = self.delegation_data[receiver][_gauge].data[length-1]
-            self.delegation_data[receiver][_gauge].data[length-1] = 0
-
-
-@external
-def delegate_boost(
-    _delegator: address,
-    _gauge: address,
-    _receiver: address,
-    _pct: uint256,
-    _cancel_time: uint256,
-    _expire_time: uint256
-) -> bool:
-    """
-    @notice Delegate per-gauge or global boost to another account
-    @param _delegator Address of the user delegating boost. The caller must be the
-                      delegator or the approved operator of the delegator.
-    @param _gauge Address of the gauge to delegate for. Set as ZERO_ADDRESS for
-                  global delegation. Global delegation is not possible if there is
-                  also one or more active per-gauge delegations.
-    @param _receiver Address to delegate boost to.
-    @param _pct Percentage of boost to delegate. 100% is expressed as 10000.
-    @param _cancel_time Delegation cannot be cancelled before this time.
-    @param _expire_time Delegation automatically expires at this time.
-    @return bool success
-    """
-    assert msg.sender in [_delegator, self.operator_of[_delegator]], "Only owner or operator"
-
-    assert _delegator != _receiver, "Cannot delegate to self"
-    assert _pct >= 100, "Percent too low"
-    assert _pct <= 10000, "Percent too high"
-    assert _expire_time < 2**40, "Expiry time too high"
-    assert _expire_time > block.timestamp, "Already expired"
-    assert _cancel_time <= _expire_time, "Cancel time after expiry time"
-
-    # check for minimum ve- balance, used to prevent 0 ve- delegation spam
-    assert self._balanceOf(_delegator) >= MIN_VE, "Insufficient ve- to delegate"
-
-    # check for an existing, expired delegation
-    data: uint256 = self.delegated_to[_delegator][_gauge]
-    if data != 0:
-        assert data % 2**40 <= block.timestamp, "Existing delegation has not expired"
-        self._delete_delegation_data(_delegator, _gauge, data)
-
-    if _gauge == ZERO_ADDRESS:
-        assert self.delegation_count[_delegator] == 0, "Cannot delegate globally while per-gauge is active"
-    else:
-        assert self.delegated_to[_delegator][ZERO_ADDRESS] == 0, "Cannot delegate per-gauge while global is active"
-
-    # tightly pack the delegation data
-    # [address][uint16 pct][uint40 cancel time][uint40 expire time]
-    data = shift(_pct, -80) + shift(_cancel_time, -40) + _expire_time
-    idx: uint256 = self.delegation_data[_receiver][_gauge].length
-
-    self.delegation_data[_receiver][_gauge].data[idx] = data + shift(convert(_delegator, uint256), -96)
-    self.delegated_to[_delegator][_gauge] = data + shift(convert(_receiver, uint256), -96)
-    self.delegation_data[_receiver][_gauge].length = idx + 1
-
-    log NewDelegation(_delegator, _gauge, _receiver, _pct, _cancel_time, _expire_time)
-    return True
-
-
-@external
-def cancel_delegation(_delegator: address, _gauge: address) -> bool:
-    """
-    @notice Cancel an existing boost delegation
-    @param _delegator Address of the user delegating boost. The caller can be the
-                      delegator, the receiver, the approved operator of the delegator
-                      or receiver. The delegator can cancel after the cancel time
-                      has passed, the receiver can cancel at any time.
-    @param _gauge Address of the gauge to cancel delegattion for. Set as ZERO_ADDRESS
-                  for global delegation.
-    @return bool success
-    """
-    data: uint256 = self.delegated_to[_delegator][_gauge]
-    assert data != 0, "No delegation for this pool"
-
-    receiver: address = convert(shift(data, 96), address)
-    if msg.sender not in [receiver, self.operator_of[receiver]]:
-        assert msg.sender in [receiver, self.operator_of[receiver]], "Only owner or operator"
-        assert shift(data, 40) % 2**40 <= block.timestamp, "Not yet cancellable"
-
-    self._delete_delegation_data(_delegator, _gauge, data)
-
-    log CancelledDelegation(_delegator, _gauge, receiver, msg.sender)
-    return True
-
-
-@view
-@external
-def get_adjusted_ve_balance(_user: address, _gauge: address) -> uint256:
-    """
-    @notice Get the adjusted ve- balance of an account after delegation
-    @param _user Address to query a ve- balance for
-    @param _gauge Gauge address
-    @return Adjusted ve- balance after delegation
-    """
-    # query the initial ve balance for `_user`
-    voting_balance: uint256 = self._balanceOf(_user)
-
-    # check if the user has delegated any ve and reduce the voting balance
-    delegation_count: uint256 = self.delegation_count[_user]
-    if delegation_count != 0:
-        is_global: bool = False
-        # apply global delegation
-        if delegation_count == 1:
-            data: uint256 = self.delegated_to[_user][ZERO_ADDRESS]
-            if data % 2**40 > block.timestamp:
-                voting_balance = voting_balance * (10000 - shift(data, 80) % 2**16) / 10000
-                is_global = True
-        # apply pool-specific delegation
-        if not is_global:
-            data: uint256 = self.delegated_to[_user][_gauge]
-            if data % 2**40 > block.timestamp:
-                voting_balance = voting_balance * (10000 - shift(data, 80) % 2**16) / 10000
-
-    # check for other ve delegated to `_user` and increase the voting balance
-    for target in [_gauge, ZERO_ADDRESS]:
-        length: uint256 = self.delegation_data[_user][target].length
-        if length > 0:
-            for i in range(10):
-                if i == length:
-                    break
-                data: uint256 = self.delegation_data[_user][target].data[i]
-                if data % 2**40 > block.timestamp:
-                    delegator: address = convert(shift(data, 96), address)
-                    delegator_balance: uint256 = self._balanceOf(delegator)
-                    voting_balance += delegator_balance * (shift(data, 80) % 2**16) / 10000
-
-    return voting_balance
-
-
-@external
-def update_delegation_records(_user: address, _gauge: address) -> bool:
-    """
-    @notice Remove data about any expired delegations for a user.
-    @dev Reduces gas costs when calling `get_adjusted_ve_balance` on
-         an address with expired delegations.
-    @param _user Address to update records for.
-    @param _gauge Gauge address. Use `ZERO_ADDRESS` for global delegations.
-    """
-    length: uint256 = self.delegation_data[_user][_gauge].length - 1
-    adjusted_length: uint256 = length
-
-    # iterate in reverse over `delegation_data` and remove expired records
-    for i in range(10):
-        if i > length:
-            break
-        idx: uint256 = length - i
-        data: uint256 = self.delegation_data[_user][_gauge].data[idx]
-        if data % 2**40 <= block.timestamp:
-            # delete record for the delegator
-            delegator: address = convert(shift(data, 96), address)
-            self.delegated_to[delegator][_gauge] = 0
-            self.delegation_count[delegator] -= 1
-
-            # delete record for the receiver
-            if idx == adjusted_length:
-                self.delegation_data[_user][_gauge].data[idx] = 0
-            else:
-                self.delegation_data[_user][_gauge].data[idx] = self.delegation_data[_user][_gauge].data[adjusted_length]
-            adjusted_length -= 1
-
-    return True
