@@ -177,7 +177,7 @@ contract Gauge is RewardBase {
     }
 
     function exit() external {
-        _withdraw(balanceOf[msg.sender]);
+        if (balanceOf[msg.sender] > 0) _withdraw(balanceOf[msg.sender]);
         getReward(incentives[0]);
     }
 
