@@ -240,7 +240,6 @@ contract Bribe is RewardBase {
 contract BaseV1Gauges {
 
     address public immutable _ve;
-    address public immutable base;
     address public immutable factory;
     address constant ZERO_ADDRESS = 0x0000000000000000000000000000000000000000;
 
@@ -267,7 +266,6 @@ contract BaseV1Gauges {
     constructor(address __ve, address _factory) {
         gov = msg.sender;
         _ve = __ve;
-        base = ve(__ve).token();
         factory = _factory;
     }
 
@@ -384,7 +382,6 @@ contract BaseV1Gauges {
         gauges[_pool] = _gauge;
         enabled[_pool] = true;
         _pools.push(_pool);
-        erc20(base).approve(_gauge, type(uint).max);
         return _gauge;
     }
 
@@ -397,7 +394,6 @@ contract BaseV1Gauges {
         gauges[_pool] = _gauge;
         enabled[_pool] = true;
         _pools.push(_pool);
-        erc20(base).approve(_gauge, type(uint).max);
         return _gauge;
     }
 
@@ -427,6 +423,8 @@ contract BaseV1Gauges {
                     uint _reward = _balance * weights[_pools[x]] / _totalWeight;
                     if (_reward > 0) {
                         address _gauge = gauges[_pools[x]];
+
+                        erc20(token).approve(_gauge, _reward);
                         Gauge(_gauge).notifyRewardAmount(token, _reward);
                     }
                 }
