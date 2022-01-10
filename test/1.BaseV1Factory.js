@@ -57,7 +57,7 @@ describe("BaseV1Factory", function () {
     const BaseV1Factory = await ethers.getContractFactory("BaseV1Factory");
     factory = await BaseV1Factory.deploy();
     await factory.deployed();
-    //console.log(await factory.pairCodeHash());
+    console.log(await factory.pairCodeHash());
 
     expect(await factory.allPairsLength()).to.equal(0);
   });

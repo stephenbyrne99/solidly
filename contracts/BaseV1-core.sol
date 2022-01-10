@@ -2,12 +2,6 @@
 
 pragma solidity 0.8.11;
 
-interface ve {
-    function deposit_for(address, uint) external;
-    function token() external view returns (address);
-    function get_adjusted_ve_balance(address, address) external view returns (uint);
-}
-
 interface erc20 {
     function totalSupply() external view returns (uint256);
     function transfer(address recipient, uint amount) external returns (bool);
@@ -57,6 +51,30 @@ library UQ112x112 {
     }
 }
 
+contract BaseV1Fees {
+    address immutable pair;
+    address immutable token0;
+    address immutable token1;
+    constructor(address _token0, address _token1) {
+        pair = msg.sender;
+        token0 = _token0;
+        token1 = _token1;
+    }
+
+    function _safeTransfer(address token,address to,uint256 value) internal {
+        (bool success, bytes memory data) =
+            token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))));
+    }
+
+    function claimFeesFor(address recipient, uint amount0, uint amount1) external {
+        require(msg.sender == pair);
+        if (amount0 > 0) _safeTransfer(token0, recipient, amount0);
+        if (amount1 > 0) _safeTransfer(token1, recipient, amount1);
+    }
+
+}
+
 contract BaseV1Pair {
     using UQ112x112 for uint224;
 
@@ -84,6 +102,7 @@ contract BaseV1Pair {
     address public factory;
     address public token0;
     address public token1;
+    address public fees;
 
     uint decimals0;
     uint decimals1;
@@ -95,6 +114,72 @@ contract BaseV1Pair {
     uint public price0CumulativeLast;
     uint public price1CumulativeLast;
     uint public kLast;
+
+    uint public index0 = 0;
+    uint public index1 = 0;
+
+    mapping(address => uint) public supplyIndex0;
+    mapping(address => uint) public supplyIndex1;
+
+    function _update0(uint amount) internal {
+        _safeTransfer(token0, fees, amount);
+        uint256 _ratio = amount * 1e18 / totalSupply;
+        if (_ratio > 0) {
+          index0 += _ratio;
+        }
+    }
+
+    function _update1(uint amount) internal {
+        _safeTransfer(token1, fees, amount);
+        uint256 _ratio = amount * 1e18 / totalSupply;
+        if (_ratio > 0) {
+          index1 += _ratio;
+        }
+    }
+
+    mapping(address => uint) public claimable0;
+    mapping(address => uint) public claimable1;
+
+    function claimFees() external {
+        claimFeesFor(msg.sender);
+    }
+
+    function claimFeesFor(address recipient) public lock {
+        _updateFor(recipient);
+
+        uint _claimable0 = claimable0[recipient];
+        uint _claimable1 = claimable1[recipient];
+
+        claimable0[recipient] = 0;
+        claimable1[recipient] = 0;
+
+        BaseV1Fees(fees).claimFeesFor(recipient, _claimable0, _claimable1);
+    }
+
+    function _updateFor(address recipient) internal {
+        uint _supplied = balanceOf[recipient];
+        if (_supplied > 0) {
+            uint _supplyIndex0 = supplyIndex0[recipient];
+            uint _supplyIndex1 = supplyIndex1[recipient];
+            uint _index0 = index0;
+            uint _index1 = index1;
+            supplyIndex0[recipient] = _index0;
+            supplyIndex1[recipient] = _index1;
+            uint _delta0 = _index0 - _supplyIndex0;
+            uint _delta1 = _index1 - _supplyIndex1;
+            if (_delta0 > 0) {
+              uint _share = _supplied * _delta0 / 1e18;
+              claimable0[recipient] += _share;
+            }
+            if (_delta1 > 0) {
+              uint _share = _supplied * _delta1 / 1e18;
+              claimable1[recipient] += _share;
+            }
+        } else {
+            supplyIndex0[recipient] = index0;
+            supplyIndex1[recipient] = index1;
+        }
+    }
 
     function getReserves() public view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast) {
         _reserve0 = reserve0;
@@ -155,6 +240,7 @@ contract BaseV1Pair {
         token0 = _token0;
         token1 = _token1;
         stable = _stable;
+        fees = address(new BaseV1Fees(_token0, _token1));
         if (_stable) {
             decimals = 6;
             decimals0 = 10**(erc20(_token0).decimals()-6);
@@ -262,9 +348,8 @@ contract BaseV1Pair {
         { // scope for reserve{0,1}Adjusted, avoids stack too deep errors
         address _token0 = token0;
         address _token1 = token1;
-        address feeTo = BaseV1Factory(factory).feeTo();
-        if (amount0In > 0) _safeTransfer(_token0, feeTo, amount0In / 10000);
-        if (amount1In > 0) _safeTransfer(_token1, feeTo, amount1In / 10000);
+        if (amount0In > 0) _update0(amount0In / 10000); // accrue fees for token0
+        if (amount1In > 0) _update1(amount1In / 10000); // accrue fees for token1
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
         require(_k(_balance0/decimals0, _balance1/decimals1) > _k(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
@@ -314,12 +399,14 @@ contract BaseV1Pair {
     }
 
     function _mint(address dst, uint amount) internal {
+        _updateFor(dst);
         totalSupply += amount;
         balanceOf[dst] += amount;
         emit Transfer(address(0), dst, amount);
     }
 
     function _burn(address dst, uint amount) internal {
+        _updateFor(dst);
         totalSupply -= amount;
         balanceOf[dst] -= amount;
         emit Transfer(dst, address(0), amount);
@@ -369,6 +456,9 @@ contract BaseV1Pair {
     }
 
     function _transferTokens(address src, address dst, uint amount) internal {
+        _updateFor(src);
+        _updateFor(dst);
+
         balanceOf[src] -= amount;
         balanceOf[dst] += amount;
 
@@ -377,12 +467,6 @@ contract BaseV1Pair {
 }
 
 contract BaseV1Factory {
-
-    address public feeTo;
-    address public gov;
-    address public nextgov;
-    uint public commitgov;
-    uint public constant delay = 1 days;
 
     mapping(address => mapping(address => mapping(bool => address))) public getPair;
     address[] public allPairs;
@@ -396,21 +480,6 @@ contract BaseV1Factory {
 
     function pairCodeHash() external pure returns (bytes32) {
         return keccak256(type(BaseV1Pair).creationCode);
-    }
-
-    modifier onlyG() {
-        require(msg.sender == gov);
-        _;
-    }
-
-    function setGov(address _gov) external onlyG {
-        nextgov = _gov;
-        commitgov = block.timestamp + delay;
-    }
-
-    function acceptGov() external {
-        require(msg.sender == nextgov && commitgov < block.timestamp);
-        gov = nextgov;
     }
 
     function createPair(address tokenA, address tokenB, bool stable) external returns (address pair) {
@@ -429,9 +498,5 @@ contract BaseV1Factory {
         allPairs.push(pair);
         isPair[pair] = true;
         emit PairCreated(token0, token1, stable, pair, allPairs.length);
-    }
-
-    function setFeeTo(address _feeTo) external onlyG {
-        feeTo = _feeTo;
     }
 }
