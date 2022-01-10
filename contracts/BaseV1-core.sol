@@ -111,6 +111,8 @@ contract BaseV1Pair {
     uint112 public reserve1;
     uint32 public blockTimestampLast;
 
+    uint public reserve0Last;
+    uint public reserve1Last;
     uint public price0CumulativeLast;
     uint public price1CumulativeLast;
     uint public kLast;
@@ -127,6 +129,7 @@ contract BaseV1Pair {
         if (_ratio > 0) {
           index0 += _ratio;
         }
+        emit Fees(msg.sender, amount, 0);
     }
 
     function _update1(uint amount) internal {
@@ -135,6 +138,7 @@ contract BaseV1Pair {
         if (_ratio > 0) {
           index1 += _ratio;
         }
+        emit Fees(msg.sender, 0, amount);
     }
 
     mapping(address => uint) public claimable0;
@@ -192,6 +196,7 @@ contract BaseV1Pair {
         _decimals1 = decimals1;
     }
 
+    event Fees(address indexed sender, uint amount0, uint amount1);
     event Mint(address indexed sender, uint amount0, uint amount1);
     event Burn(address indexed sender, uint amount0, uint amount1, address indexed to);
     event Swap(
@@ -264,6 +269,8 @@ contract BaseV1Pair {
         if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
             price0CumulativeLast += uint(UQ112x112.encode(_reserve1).uqdiv(_reserve0)) * timeElapsed;
             price1CumulativeLast += uint(UQ112x112.encode(_reserve0).uqdiv(_reserve1)) * timeElapsed;
+            reserve0Last = _reserve0;
+            reserve1Last = _reserve1;
         }
         reserve0 = uint112(balance0);
         reserve1 = uint112(balance1);
@@ -306,21 +313,21 @@ contract BaseV1Pair {
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
         address _token0 = token0;                                // gas savings
         address _token1 = token1;                                // gas savings
-        uint balance0 = erc20(_token0).balanceOf(address(this));
-        uint balance1 = erc20(_token1).balanceOf(address(this));
-        uint liquidity = balanceOf[address(this)];
+        uint _balance0 = erc20(_token0).balanceOf(address(this));
+        uint _balance1 = erc20(_token1).balanceOf(address(this));
+        uint _liquidity = balanceOf[address(this)];
 
         uint _totalSupply = totalSupply; // gas savings, must be defined here since totalSupply can update in _mintFee
-        amount0 = liquidity * balance0 / _totalSupply; // using balances ensures pro-rata distribution
-        amount1 = liquidity * balance1 / _totalSupply; // using balances ensures pro-rata distribution
+        amount0 = _liquidity * _balance0 / _totalSupply; // using balances ensures pro-rata distribution
+        amount1 = _liquidity * _balance1 / _totalSupply; // using balances ensures pro-rata distribution
         require(amount0 > 0 && amount1 > 0, 'ILB'); // BaseV1: INSUFFICIENT_LIQUIDITY_BURNED
-        _burn(address(this), liquidity);
+        _burn(address(this), _liquidity);
         _safeTransfer(_token0, to, amount0);
         _safeTransfer(_token1, to, amount1);
-        balance0 = erc20(_token0).balanceOf(address(this));
-        balance1 = erc20(_token1).balanceOf(address(this));
+        _balance0 = erc20(_token0).balanceOf(address(this));
+        _balance1 = erc20(_token1).balanceOf(address(this));
 
-        _update(balance0, balance1, _reserve0, _reserve1);
+        _update(_balance0, _balance1, _reserve0, _reserve1);
         emit Burn(msg.sender, amount0, amount1, to);
     }
 
@@ -352,7 +359,7 @@ contract BaseV1Pair {
         if (amount1In > 0) _update1(amount1In / 10000); // accrue fees for token1
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
-        require(_k(_balance0/decimals0, _balance1/decimals1) > _k(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
+        require(_k(_balance0/decimals0, _balance1/decimals1) >= _k(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
         }
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
