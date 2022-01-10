@@ -21,7 +21,7 @@ interface erc20 {
 
 interface ve {
     function token() external view returns (address);
-    function get_adjusted_ve_balance(address, address) external view returns (uint);
+    function balanceOfAtTime(address, uint) external view returns (uint);
 }
 
 interface IBaseV1Factory {
@@ -136,7 +136,7 @@ contract Gauge is RewardBase {
     function derivedBalance(address account) public view returns (uint) {
         uint _balance = balanceOf[account];
         uint _derived = _balance * 40 / 100;
-        uint _adjusted = (totalSupply * ve(_ve).get_adjusted_ve_balance(account, address(this)) / erc20(_ve).totalSupply()) * 60 / 100;
+        uint _adjusted = (totalSupply * ve(_ve).balanceOfAtTime(account, block.timestamp) / erc20(_ve).totalSupply()) * 60 / 100;
         return Math.min(_derived + _adjusted, _balance);
     }
 
@@ -315,7 +315,7 @@ contract BaseV1Gauges {
         uint[] memory _weights = new uint[](_poolCnt);
 
         uint _prevUsedWeight = usedWeights[_owner];
-        uint _weight = ve(_ve).get_adjusted_ve_balance(_owner, ZERO_ADDRESS);
+        uint _weight = ve(_ve).balanceOfAtTime(_owner, block.timestamp);
 
         for (uint i = 0; i < _poolCnt; i ++) {
             uint _prevWeight = votes[_owner][_poolVote[i]];
@@ -329,7 +329,7 @@ contract BaseV1Gauges {
         // _weights[i] = percentage * 100
         _reset(_owner);
         uint _poolCnt = _poolVote.length;
-        uint _weight = ve(_ve).get_adjusted_ve_balance(_owner, ZERO_ADDRESS);
+        uint _weight = ve(_ve).balanceOfAtTime(_owner, block.timestamp);
         uint _totalVoteWeight = 0;
         uint _usedWeight = 0;
 

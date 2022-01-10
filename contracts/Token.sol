@@ -76,7 +76,7 @@ contract Token {
         return address(this);
     }
 
-    function get_adjusted_ve_balance(address account, address delegate) external view returns (uint) {
+    function balanceOfAtTime(address account, uint timestamp) external view returns (uint) {
         return balanceOf[account];
     }
 
