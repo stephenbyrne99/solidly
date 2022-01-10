@@ -275,6 +275,17 @@ def locked__end(_tokenId: uint256) -> uint256:
     """
     return self.locked[_tokenId].end
 
+
+@view
+@internal
+def _balance(_owner: address) -> uint256:
+    """
+    @dev Returns the number of NFTs owned by `_owner`.
+         Throws if `_owner` is the zero address. NFTs assigned to the zero address are considered invalid.
+    @param _owner Address for whom to query the balance.
+    """
+    return self.ownerToNFTokenCount[_owner]
+
 @view
 @external
 def balanceOf(_owner: address) -> uint256:
@@ -283,7 +294,7 @@ def balanceOf(_owner: address) -> uint256:
          Throws if `_owner` is the zero address. NFTs assigned to the zero address are considered invalid.
     @param _owner Address for whom to query the balance.
     """
-    return self.ownerToNFTokenCount[_owner]
+    return self._balance(_owner)
 
 @view
 @external
@@ -348,7 +359,7 @@ def tokenOfOwnerByIndex(_owner: address, _tokenIndex: uint256) -> uint256:
     """
     @dev  Get token by index
     """
-    assert _tokenIndex <= self._balanceOf(_owner)
+    assert _tokenIndex <= self._balance(_owner)
     return self.ownerToNFTokenIdList[_owner][_tokenIndex]
 
 ### TRANSFER FUNCTION HELPERS ###
@@ -376,7 +387,7 @@ def _addTokenToOwnerList(_to: address, _tokenId: uint256):
     @param to address of the receiver
     @param tokenId uint256 ID Of the token to be added
     """
-    current_count: uint256 = self._balanceOf(_to)
+    current_count: uint256 = self._balance(_to)
 
     self.ownerToNFTokenIdList[_to][current_count] = _tokenId
     self.tokenToOwnerIndex[_tokenId] = current_count
@@ -389,7 +400,7 @@ def _removeTokenFromOwnerList(_from: address, _tokenId: uint256):
     @param tokenId uint256 ID Of the token to be removed
     """
     # Delete
-    current_count: uint256 = self._balanceOf(_from)
+    current_count: uint256 = self._balance(_from)
     current_index: uint256 = self.tokenToOwnerIndex[_tokenId]
 
     if current_count == current_index:
@@ -884,26 +895,6 @@ def find_block_epoch(_block: uint256, max_epoch: uint256) -> uint256:
 
 @internal
 @view
-def _balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
-    """
-    @notice Get the current voting power for `msg.sender`
-    @param addr User wallet address
-    @param _t Epoch time to return voting power at
-    @return User voting power
-    """
-    _count: uint256 = self.ownerToNFTokenCount[addr]
-    _start: uint256 = 0
-    _balance: uint256 = 0
-    for i in range(MAX_LOCKS):
-        if (i >= _count):
-            break
-
-        _tokenId: uint256 = self.ownerToNFTokenIdList[addr][i]
-        _balance += self._balanceOfNFT(_tokenId, _t)
-    return _balance
-
-@internal
-@view
 def _balanceOfNFT(_tokenId: uint256, _t: uint256 = block.timestamp) -> uint256:
     """
     @notice Get the current voting power for `_tokenId`
@@ -922,6 +913,27 @@ def _balanceOfNFT(_tokenId: uint256, _t: uint256 = block.timestamp) -> uint256:
             last_point.bias = 0
         return convert(last_point.bias, uint256)
 
+@internal
+@view
+def _balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
+    """
+    @notice Get the current voting power for `msg.sender`
+    @param addr User wallet address
+    @param _t Epoch time to return voting power at
+    @return User voting power
+    """
+    _count: uint256 = self.ownerToNFTokenCount[addr]
+    _start: uint256 = 0
+    _balance: uint256 = 0
+    for i in range(MAX_LOCKS):
+        if (i >= _count):
+            break
+
+        _tokenId: uint256 = self.ownerToNFTokenIdList[addr][i]
+        _balance += self._balanceOfNFT(_tokenId, _t)
+    return _balance
+
+
 @external
 @view
 def balanceOfAtTime(addr: address, _t: uint256 = block.timestamp) -> uint256:
@@ -933,24 +945,6 @@ def balanceOfAtTime(addr: address, _t: uint256 = block.timestamp) -> uint256:
     @return User voting power
     """
     return self._balanceOf(addr, _t)
-
-@external
-@view
-def balanceOfAt(addr: address, _block: uint256) -> uint256:
-    _count: uint256 = self.ownerToNFTokenCount[addr]
-    _balance: uint256 = 0
-    for i in range(MAX_LOCKS):
-        if (i >= _count):
-            break
-
-        _tokenId: uint256 = self.ownerToNFTokenIdList[addr][i]
-        _balance += self._balanceOfAtNFT(_tokenId, _block)
-    return _balance
-
-@external
-@view
-def balanceOfAtNFT(_tokenId: uint256, _block: uint256) -> uint256:
-    return self._balanceOfAtNFT(_tokenId, _block)
 
 @internal
 @view
@@ -1002,6 +996,25 @@ def _balanceOfAtNFT(_tokenId: uint256, _block: uint256) -> uint256:
     else:
         return 0
 
+
+
+@external
+@view
+def balanceOfAt(addr: address, _block: uint256) -> uint256:
+    _count: uint256 = self.ownerToNFTokenCount[addr]
+    _balance: uint256 = 0
+    for i in range(MAX_LOCKS):
+        if (i >= _count):
+            break
+
+        _tokenId: uint256 = self.ownerToNFTokenIdList[addr][i]
+        _balance += self._balanceOfAtNFT(_tokenId, _block)
+    return _balance
+
+@external
+@view
+def balanceOfAtNFT(_tokenId: uint256, _block: uint256) -> uint256:
+    return self._balanceOfAtNFT(_tokenId, _block)
 
 @internal
 @view
