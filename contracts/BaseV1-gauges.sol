@@ -30,12 +30,13 @@ interface IBaseV1Factory {
 
 
 abstract contract RewardBase {
-    uint constant DURATION = 7 days;
+    uint constant DURATION = 7 days; // rewards are released over 7 days
     uint constant PRECISION = 10 ** 18;
-    uint constant MAXTIME = 4 * 365 * 86400;
 
-    address[] public incentives;
-    mapping(address => bool) public isIncentive;
+    address[] public incentives; // array of incentives for a given gauge/bribe
+    mapping(address => bool) public isIncentive; // confirms if the incentive is currently valid for the gauge/bribe
+
+    // default snx staking contract implementation
     mapping(address => uint) public rewardRate;
     mapping(address => uint) public periodFinish;
     mapping(address => uint) public lastUpdateTime;
@@ -47,41 +48,59 @@ abstract contract RewardBase {
     uint public totalSupply;
     mapping(address => uint) public balanceOf;
 
+    // simple re-entrancy check
+    uint _unlocked = 1;
+    modifier lock() {
+        require(_unlocked == 1);
+        _unlocked = 0;
+        _;
+        _unlocked = 1;
+    }
+
     function incentivesLength() external view returns (uint) {
         return incentives.length;
     }
 
+    // returns the last time the reward was modified or periodFinish if the reward has ended
     function lastTimeRewardApplicable(address token) public view returns (uint) {
         return Math.min(block.timestamp, periodFinish[token]);
     }
 
+    // how to calculate the reward given per token "staked" (or voted for bribes)
     function rewardPerToken(address token) public virtual view returns (uint);
 
+    // how to calculate the total earnings of an address for a given token
     function earned(address token, address account) public virtual view returns (uint);
 
+    // total amount of rewards returned for the 7 day duration
     function getRewardForDuration(address token) external view returns (uint) {
         return rewardRate[token] * DURATION;
     }
 
-    function getReward(address token) public updateReward(token, msg.sender) {
+    // allows a user to claim rewards for a given token
+    function getReward(address token) public lock updateReward(token, msg.sender) {
         uint _reward = rewards[token][msg.sender];
         rewards[token][msg.sender] = 0;
         _safeTransfer(token, msg.sender, _reward);
     }
 
-    function notifyRewardAmount(address token, uint amount) external updateReward(token, address(0)) {
+    // used to notify a gauge/bribe of a given reward, this can create griefing attacks by extending rewards
+    // TODO: rework to weekly resets, _updatePeriod as per v1 bribes
+    function notifyRewardAmount(address token, uint amount) external lock updateReward(token, address(0)) {
         _safeTransferFrom(token, msg.sender, address(this), amount);
         if (block.timestamp >= periodFinish[token]) {
             rewardRate[token] = amount / DURATION;
         } else {
             uint _remaining = periodFinish[token] - block.timestamp;
             uint _left = _remaining * rewardRate[token];
+            require(amount >= _left); // very hacky fix for griefing attacks, consider reworking
             rewardRate[token] = (amount + _left) / DURATION;
         }
 
         lastUpdateTime[token] = block.timestamp;
         periodFinish[token] = block.timestamp + DURATION;
 
+        // if it is a new incentive, add it to the stack
         if (isIncentive[token] == false) {
             isIncentive[token] = true;
             incentives.push(token);
@@ -103,10 +122,12 @@ abstract contract RewardBase {
     }
 }
 
+// Gauges are used to incentivize pools, they emit reward tokens over 7 days for staked LP tokens
+// Nuance: getReward must be called at least once for tokens other than incentive[0] to start accrueing rewards
 contract Gauge is RewardBase {
 
-    address public immutable stake;
-    address immutable _ve;
+    address public immutable stake; // the LP token that needs to be staked for rewards
+    address immutable _ve; // the ve token used for gauges
 
     uint public derivedSupply;
     mapping(address => uint) public derivedBalances;
@@ -115,16 +136,17 @@ contract Gauge is RewardBase {
         stake = _stake;
         address __ve = BaseV1Gauges(msg.sender)._ve();
         _ve = __ve;
-        incentives.push(ve(__ve).token());
+        incentives.push(ve(__ve).token()); // assume the first incentive is the same token that creates ve
     }
 
     function rewardPerToken(address token) public override view returns (uint) {
         if (totalSupply == 0) {
             return rewardPerTokenStored[token];
-        }
+        } // derivedSupply is used instead of totalSupply to modify for ve-BOOST
         return rewardPerTokenStored[token] + ((lastTimeRewardApplicable(token) - lastUpdateTime[token]) * rewardRate[token] * PRECISION / derivedSupply);
     }
 
+    // used to update an account internally and externally, since ve decays over times, an address could have 0 balance but still register here
     function kick(address account) public {
         uint _derivedBalance = derivedBalances[account];
         derivedSupply -= _derivedBalance;
@@ -144,6 +166,8 @@ contract Gauge is RewardBase {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
+    // Current commented out since hardhat doesn't support testing with function overloading
+
     /*function deposit() external {
         _deposit(erc20(stake).balanceOf(msg.sender), msg.sender);
     }
@@ -156,10 +180,10 @@ contract Gauge is RewardBase {
         _deposit(amount, account);
     }
 
-    function _deposit(uint amount, address account) internal updateReward(incentives[0], account) {
+    function _deposit(uint amount, address account) internal lock updateReward(incentives[0], account) {
+        _safeTransferFrom(stake, account, address(this), amount);
         totalSupply += amount;
         balanceOf[account] += amount;
-        _safeTransferFrom(stake, account, address(this), amount);
     }
 
     function withdraw() external {
@@ -170,14 +194,14 @@ contract Gauge is RewardBase {
         _withdraw(amount);
     }
 
-    function _withdraw(uint amount) internal updateReward(incentives[0], msg.sender) {
+    function _withdraw(uint amount) internal lock updateReward(incentives[0], msg.sender) {
         totalSupply -= amount;
         balanceOf[msg.sender] -= amount;
         _safeTransfer(stake, msg.sender, amount);
     }
 
     function exit() external {
-        if (balanceOf[msg.sender] > 0) _withdraw(balanceOf[msg.sender]);
+        if (balanceOf[msg.sender] > 0) _withdraw(balanceOf[msg.sender]); // include balance 0 check for tokens that might revert on 0 balance (assuming withdraw > exit)
         getReward(incentives[0]);
     }
 
@@ -195,9 +219,11 @@ contract Gauge is RewardBase {
     }
 }
 
+// Bribes pay out rewards for a given pool based on the votes that were received from the user (goes hand in hand with BaseV1Gauges.vote())
+// Nuance: users must call updateReward after they voted for a given bribe
 contract Bribe is RewardBase {
 
-    address immutable factory;
+    address immutable factory; // only factory can modify balances (since it only happens on vote())
 
     constructor() {
         factory = msg.sender;
@@ -214,6 +240,7 @@ contract Bribe is RewardBase {
         return (balanceOf[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
+    // This is an external function, but internal notation is used since it can only be called "internally" from BaseV1Gauges
     function _deposit(uint amount, address account) external {
         require(msg.sender == factory);
         totalSupply += amount;
@@ -239,16 +266,19 @@ contract Bribe is RewardBase {
 
 contract BaseV1Gauges {
 
-    address public immutable _ve;
-    address public immutable factory;
-    address constant ZERO_ADDRESS = 0x0000000000000000000000000000000000000000;
+    address public immutable _ve; // the ve token that governs these contracts
+    address public immutable factory; // the BaseV1Factory
 
-    uint public totalWeight;
+    uint public totalWeight; // total voting weight
 
-    address public gov;
-    address public nextgov;
-    uint public commitgov;
-    uint public constant delay = 1 days;
+    // simple re-entrancy check
+    uint _unlocked = 1;
+    modifier lock() {
+        require(_unlocked == 1);
+        _unlocked = 0;
+        _;
+        _unlocked = 1;
+    }
 
     address[] internal _pools;
     mapping(address => address) public gauges; // pool => gauge
@@ -264,24 +294,8 @@ contract BaseV1Gauges {
     }
 
     constructor(address __ve, address _factory) {
-        gov = msg.sender;
         _ve = __ve;
         factory = _factory;
-    }
-
-    modifier onlyG() {
-        require(msg.sender == gov);
-        _;
-    }
-
-    function setGov(address _gov) external onlyG {
-        nextgov = _gov;
-        commitgov = block.timestamp + delay;
-    }
-
-    function acceptGov() external {
-        require(msg.sender == nextgov && commitgov < block.timestamp);
-        gov = nextgov;
     }
 
     function reset() external {
@@ -324,7 +338,6 @@ contract BaseV1Gauges {
     }
 
     function _vote(address _owner, address[] memory _poolVote, uint[] memory _weights) internal {
-        // _weights[i] = percentage * 100
         _reset(_owner);
         uint _poolCnt = _poolVote.length;
         uint _weight = ve(_ve).balanceOfAtTime(_owner, block.timestamp);
@@ -374,17 +387,6 @@ contract BaseV1Gauges {
         }
     }
 
-    function forceGauge(address _pool) external onlyG returns (address) {
-        require(gauges[_pool] == address(0x0), "exists");
-        address _gauge = address(new Gauge(_pool));
-        address _bribe = address(new Bribe());
-        bribes[_gauge] = _bribe;
-        gauges[_pool] = _gauge;
-        enabled[_pool] = true;
-        _pools.push(_pool);
-        return _gauge;
-    }
-
     function createGauge(address _pool) external returns (address) {
         require(gauges[_pool] == address(0x0), "exists");
         require(IBaseV1Factory(factory).isPair(_pool), "!_pool");
@@ -397,19 +399,11 @@ contract BaseV1Gauges {
         return _gauge;
     }
 
-    function disable(address _token) external onlyG {
-        enabled[_token] = false;
-    }
-
-    function enable(address _token) external onlyG {
-        enabled[_token] = true;
-    }
-
     function length() external view returns (uint) {
         return _pools.length;
     }
 
-    function distribute(address token) external {
+    function distribute(address token) external lock {
         uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
