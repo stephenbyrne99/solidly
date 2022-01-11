@@ -333,10 +333,10 @@ contract BaseV1Pair {
         token1 = _token1;
         stable = _stable;
         fees = address(new BaseV1Fees(_token0, _token1));
-        decimals = 18; // decimal 6 instead of 8 is used since the curve can easily cause a uint overflow (x3y+y3x)
+        decimals = 18;
         if (_stable) {
-            decimals0 = 10**(18-erc20(_token0).decimals());
-            decimals1 = 10**(18-erc20(_token1).decimals());
+            decimals0 = 10**erc20(_token0).decimals();
+            decimals1 = 10**erc20(_token1).decimals();
             name = string(abi.encodePacked("StableV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
             symbol = string(abi.encodePacked("sAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
         } else {
@@ -607,8 +607,8 @@ contract BaseV1Pair {
 
     function _k(uint x, uint y) internal view returns (uint) {
       if (stable) {
-          uint _x = x * decimals0;
-          uint _y = y * decimals1;
+          uint _x = x * 1e18 / decimals0;
+          uint _y = y * 1e18 / decimals1;
           uint _a = (_x * _y) / 1e18;
           uint _b = ((_x * _x) / 1e18 + (_y * _y) / 1e18);
           return _a * _b / 1e18 / 2;  // x3y+y3x >= k
