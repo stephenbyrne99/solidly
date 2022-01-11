@@ -389,11 +389,16 @@ contract BaseV1Gauges {
         return _pools.length;
     }
 
-    function distribute(address token) external lock {
+    // Needs to be externally called
+    function distribute(address token) external {
+        distribute(token, 0, _pools.length);
+    }
+
+    function distribute(address token, uint start, uint finish) public lock {
         uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
-            for (uint x = 0; x < _pools.length; x++) {
+            for (uint x = start; x < finish; x++) {
               uint _reward = _balance * weights[_pools[x]] / _totalWeight;
               if (_reward > 0) {
                   address _gauge = gauges[_pools[x]];

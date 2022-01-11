@@ -92,7 +92,6 @@ contract minter {
             }
 
             _token.mint(address(_gauge_proxy), _amount); // mint weekly emission to gauge proxy (handles voting and distribution)
-            _gauge_proxy.distribute(address(_token)); // distribute the weekly emission to gauges
             _token.mint(address(_ve_dist), calculate_growth(_amount)); // mint inflation for staked users based on their % balance
             _ve_dist.checkpoint_token(); // checkpoint token balance that was just minted in ve_dist
             _ve_dist.checkpoint_total_supply(); // checkpoint supply
