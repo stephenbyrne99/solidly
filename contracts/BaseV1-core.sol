@@ -283,12 +283,6 @@ contract BaseV1Pair {
         _blockTimestampLast = blockTimestampLast;
     }
 
-    // Only used for stable pools
-    function getDecimals() public view returns (uint _decimals0, uint _decimals1) {
-        _decimals0 = decimals0;
-        _decimals1 = decimals1;
-    }
-
     event Fees(address indexed sender, uint amount0, uint amount1);
     event Mint(address indexed sender, uint amount0, uint amount1);
     event Burn(address indexed sender, uint amount0, uint amount1, address indexed to);
@@ -339,14 +333,13 @@ contract BaseV1Pair {
         token1 = _token1;
         stable = _stable;
         fees = address(new BaseV1Fees(_token0, _token1));
+        decimals = 18; // decimal 6 instead of 8 is used since the curve can easily cause a uint overflow (x3y+y3x)
         if (_stable) {
-            decimals = 6; // decimal 6 instead of 8 is used since the curve can easily cause a uint overflow (x3y+y3x)
-            decimals0 = 10**(erc20(_token0).decimals()-6); // 6 points of precision is lost here, this is because the curve can't hold all 18 decimal places
-            decimals1 = 10**(erc20(_token1).decimals()-6);
+            decimals0 = 10**erc20(_token0).decimals();
+            decimals1 = 10**erc20(_token0).decimals();
             name = string(abi.encodePacked("StableV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
             symbol = string(abi.encodePacked("sAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
         } else {
-            decimals = 18;
             decimals0 = 1;
             decimals1 = 1;
             name = string(abi.encodePacked("VolatileV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
@@ -580,7 +573,7 @@ contract BaseV1Pair {
         _balance0 = erc20(_token0).balanceOf(address(this)); // since we removed tokens, we need to reconfirm balances, can also simply use previous balance - amountIn/ 10000, but doing balanceOf again as safety check
         _balance1 = erc20(_token1).balanceOf(address(this));
         // The curve, either x3y+y3x for stable pools, or x*y for volatile pools
-        require(_k(_balance0/decimals0, _balance1/decimals1) >= _k(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
+        require(_k(_balance0, _balance1) >= _k(_reserve0, _reserve1), 'K'); // BaseV1: K
         }
 
         _update(_balance0, _balance1, _reserve0, _reserve1);
@@ -622,7 +615,7 @@ contract BaseV1Pair {
 
     function _k(uint x, uint y) internal view returns (uint) {
       if (stable) {
-          return x * y * (x**2+y**2) / 2;  // x3y+y3x >= k
+          return (x * y) / decimals0 * (x**2/decimals0+y**2/decimals1) / decimals1 / 2;  // x3y+y3x >= k
       } else {
           return x * y; // xy >= k
       }

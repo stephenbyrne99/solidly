@@ -15,13 +15,13 @@ interface ve {
     function totalSupply() external view returns (uint);
 }
 
-interface token {
+interface underlying {
     function mint(address, uint) external;
     function totalSupply() external view returns (uint);
 }
 
 interface gauge_proxy {
-    function distribute() external;
+    function distribute(address token) external;
 }
 
 interface ve_dist {
@@ -35,7 +35,7 @@ contract minter {
     uint constant week = 86400 * 7; // allows minting once per week (reset every Thursday 00:00 UTC)
     uint constant emission = 4; // 0.4% per week target emission
     uint constant base = 100;
-    token public immutable _token;
+    underlying public immutable _token;
     gauge_proxy public immutable _gauge_proxy;
     ve public immutable _ve;
     ve_dist public immutable _ve_dist;
@@ -48,7 +48,7 @@ contract minter {
       address  __ve, // the ve(3,3) system that will be locked into
       address __ve_dist // the distribution system that ensures users aren't diluted
     ) {
-        _token = token(ve(__ve).token());
+        _token = underlying(ve(__ve).token());
         available = _available;
         _gauge_proxy = gauge_proxy(__gauge_proxy);
         _ve = ve(__ve);
@@ -92,7 +92,7 @@ contract minter {
             }
 
             _token.mint(address(_gauge_proxy), _amount); // mint weekly emission to gauge proxy (handles voting and distribution)
-            _gauge_proxy.distribute(_token); // distribute the weekly emission to gauges
+            _gauge_proxy.distribute(address(_token)); // distribute the weekly emission to gauges
             _token.mint(address(_ve_dist), calculate_growth(_amount)); // mint inflation for staked users based on their % balance
             _ve_dist.checkpoint_token(); // checkpoint token balance that was just minted in ve_dist
             _ve_dist.checkpoint_total_supply(); // checkpoint supply
