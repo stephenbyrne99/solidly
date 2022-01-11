@@ -606,8 +606,9 @@ contract BaseV1Pair {
     function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
         (uint reserveA, uint reserveB,) = getReserves();
         (reserveA, reserveB) = tokenIn == token0 ? (reserveA, reserveB) : (reserveB, reserveA);
+        (uint amountA, uint amountB) = tokenIn == token0 ? (amountIn, uint(0)) : (uint(0), amountIn);
         if (stable) {
-            return Math.sqrt(Math.sqrt(_k(amountIn+reserveA, reserveB))) * 2;
+            return Math.sqrt(Math.sqrt(_k(amountA+reserveA, amountB+reserveB))) * 2;
         } else {
             return amountIn * reserveB / reserveA;
         }
