@@ -51,6 +51,64 @@ library UQ112x112 {
     }
 }
 
+// a library for handling binary fixed point numbers (https://en.wikipedia.org/wiki/Q_(number_format))
+library FixedPoint {
+    // range: [0, 2**112 - 1]
+    // resolution: 1 / 2**112
+    struct uq112x112 {
+        uint224 _x;
+    }
+
+    // range: [0, 2**144 - 1]
+    // resolution: 1 / 2**112
+    struct uq144x112 {
+        uint _x;
+    }
+
+    uint8 private constant RESOLUTION = 112;
+
+    // encode a uint112 as a UQ112x112
+    function encode(uint112 x) internal pure returns (uq112x112 memory) {
+        return uq112x112(uint224(x) << RESOLUTION);
+    }
+
+    // encodes a uint144 as a UQ144x112
+    function encode144(uint144 x) internal pure returns (uq144x112 memory) {
+        return uq144x112(uint256(x) << RESOLUTION);
+    }
+
+    // divide a UQ112x112 by a uint112, returning a UQ112x112
+    function div(uq112x112 memory self, uint112 x) internal pure returns (uq112x112 memory) {
+        require(x != 0, 'FixedPoint: DIV_BY_ZERO');
+        return uq112x112(self._x / uint224(x));
+    }
+
+    // multiply a UQ112x112 by a uint, returning a UQ144x112
+    // reverts on overflow
+    function mul(uq112x112 memory self, uint y) internal pure returns (uq144x112 memory) {
+        uint z;
+        require(y == 0 || (z = uint(self._x) * y) / y == uint(self._x), "FixedPoint: MULTIPLICATION_OVERFLOW");
+        return uq144x112(z);
+    }
+
+    // returns a UQ112x112 which represents the ratio of the numerator to the denominator
+    // equivalent to encode(numerator).div(denominator)
+    function fraction(uint112 numerator, uint112 denominator) internal pure returns (uq112x112 memory) {
+        require(denominator > 0, "FixedPoint: DIV_BY_ZERO");
+        return uq112x112((uint224(numerator) << RESOLUTION) / denominator);
+    }
+
+    // decode a UQ112x112 into a uint112 by truncating after the radix point
+    function decode(uq112x112 memory self) internal pure returns (uint112) {
+        return uint112(self._x >> RESOLUTION);
+    }
+
+    // decode a UQ144x112 into a uint144 by truncating after the radix point
+    function decode144(uq144x112 memory self) internal pure returns (uint144) {
+        return uint144(self._x >> RESOLUTION);
+    }
+}
+
 contract BaseV1Fees {
     address immutable pair;
     address immutable token0;
@@ -76,6 +134,7 @@ contract BaseV1Fees {
 }
 
 contract BaseV1Pair {
+    using FixedPoint for *;
     using UQ112x112 for uint224;
 
     string public name;
@@ -103,6 +162,24 @@ contract BaseV1Pair {
     address public token0;
     address public token1;
     address public fees;
+
+    struct Observation {
+        uint32 timestamp;
+        uint price0Cumulative;
+        uint price1Cumulative;
+    }
+
+    uint public constant periodSize = 1800;
+
+    function observationLength() external view returns (uint) {
+        return observations.length;
+    }
+
+    function lastObservation() public view returns (Observation memory) {
+        return observations[observations.length-1];
+    }
+
+    Observation[] public observations;
 
     uint decimals0;
     uint decimals1;
@@ -259,6 +336,8 @@ contract BaseV1Pair {
             name = string(abi.encodePacked("VolatileV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
             symbol = string(abi.encodePacked("vAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
         }
+
+        observations.push(Observation(uint32(block.timestamp % 2**32), 0, 0));
     }
 
     // update reserves and, on the first call per block, price accumulators
@@ -272,6 +351,11 @@ contract BaseV1Pair {
             reserve0Last = _reserve0;
             reserve1Last = _reserve1;
         }
+        Observation memory _point = lastObservation();
+        timeElapsed = blockTimestamp - _point.timestamp;
+        if (timeElapsed > periodSize) {
+            observations.push(Observation(blockTimestamp, price0CumulativeLast, price1CumulativeLast));
+        }
         reserve0 = uint112(balance0);
         reserve1 = uint112(balance1);
         blockTimestampLast = blockTimestamp;
@@ -284,6 +368,117 @@ contract BaseV1Pair {
         _unlocked = 0;
         _;
         _unlocked = 1;
+    }
+
+    function currentBlockTimestamp() public view returns (uint32) {
+        return uint32(block.timestamp % 2 ** 32);
+    }
+
+    function computeAmountOut(
+        uint priceCumulativeStart, uint priceCumulativeEnd,
+        uint timeElapsed, uint amountIn
+    ) public pure returns (uint amountOut) {
+        // overflow is desired.
+        FixedPoint.uq112x112 memory priceAverage = FixedPoint.uq112x112(
+            uint224((priceCumulativeEnd - priceCumulativeStart) / timeElapsed)
+        );
+        amountOut = priceAverage.mul(amountIn).decode144();
+    }
+
+    // produces the cumulative price using counterfactuals to save gas and avoid a call to sync.
+    function currentCumulativePrices() public view returns (uint price0Cumulative, uint price1Cumulative, uint32 blockTimestamp) {
+        blockTimestamp = currentBlockTimestamp();
+        price0Cumulative = price0CumulativeLast;
+        price1Cumulative = price1CumulativeLast;
+
+        // if time has elapsed since the last update on the pair, mock the accumulated price values
+        (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast) = getReserves();
+        if (_blockTimestampLast != blockTimestamp) {
+            // subtraction overflow is desired
+            uint32 timeElapsed = blockTimestamp - _blockTimestampLast;
+            // addition overflow is desired
+            // counterfactual
+            price0Cumulative += uint(UQ112x112.encode(_reserve1).uqdiv(_reserve0)) * timeElapsed;
+            // counterfactual
+            price1Cumulative += uint(UQ112x112.encode(_reserve0).uqdiv(_reserve1)) * timeElapsed;
+        }
+    }
+
+    function current(address tokenIn, uint amountIn) external view returns (uint amountOut) {
+        Observation memory _observation = lastObservation();
+        (uint price0Cumulative, uint price1Cumulative,) = currentCumulativePrices();
+        if (block.timestamp == _observation.timestamp) {
+            _observation = observations[observations.length-2];
+        }
+
+        uint timeElapsed = block.timestamp - _observation.timestamp;
+        timeElapsed = timeElapsed == 0 ? 1 : timeElapsed;
+        if (token0 == tokenIn) {
+            return computeAmountOut(_observation.price0Cumulative, price0Cumulative, timeElapsed, amountIn);
+        } else {
+            return computeAmountOut(_observation.price1Cumulative, price1Cumulative, timeElapsed, amountIn);
+        }
+    }
+
+    function quote(address tokenIn, uint amountIn, uint granularity) external view returns (uint amountOut) {
+        uint priceAverageCumulative = 0;
+        uint length = observations.length-1;
+        uint i = length - granularity;
+
+
+        uint nextIndex = 0;
+        if (token0 == tokenIn) {
+            for (; i < length; i++) {
+                nextIndex = i+1;
+                priceAverageCumulative += computeAmountOut(
+                    observations[i].price0Cumulative,
+                    observations[nextIndex].price0Cumulative,
+                    observations[nextIndex].timestamp - observations[i].timestamp, amountIn);
+            }
+        } else {
+            for (; i < length; i++) {
+                nextIndex = i+1;
+                priceAverageCumulative += computeAmountOut(
+                    observations[i].price1Cumulative,
+                    observations[nextIndex].price1Cumulative,
+                    observations[nextIndex].timestamp - observations[i].timestamp, amountIn);
+            }
+        }
+        return priceAverageCumulative / granularity;
+    }
+
+    function prices(address tokenIn, uint amountIn, uint points) external view returns (uint[] memory) {
+        return sample(tokenIn, amountIn, points, 1);
+    }
+
+    function sample(address tokenIn, uint amountIn, uint points, uint window) public view returns (uint[] memory) {
+        uint[] memory _prices = new uint[](points);
+
+        uint length = observations.length-1;
+        uint i = length - (points * window);
+        uint nextIndex = 0;
+        uint index = 0;
+
+        if (token0 == tokenIn) {
+            for (; i < length; i+=window) {
+                nextIndex = i + window;
+                _prices[index] = computeAmountOut(
+                    observations[i].price0Cumulative,
+                    observations[nextIndex].price0Cumulative,
+                    observations[nextIndex].timestamp - observations[i].timestamp, amountIn);
+                index = index + 1;
+            }
+        } else {
+            for (; i < length; i+=window) {
+                nextIndex = i + window;
+                _prices[index] = computeAmountOut(
+                    observations[i].price1Cumulative,
+                    observations[nextIndex].price1Cumulative,
+                    observations[nextIndex].timestamp - observations[i].timestamp, amountIn);
+                index = index + 1;
+            }
+        }
+        return _prices;
     }
 
     // this low-level function should be called from a contract which performs important safety checks
