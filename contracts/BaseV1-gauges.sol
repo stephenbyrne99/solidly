@@ -389,12 +389,13 @@ contract BaseV1Gauges {
         return _pools.length;
     }
 
-    // Needs to be externally called
+    // Needs to be externally called, this needs to be refactored somehow
+    // TODO: refactor for DDOS situation where spam create pools
     function distribute(address token) external {
-        distribute(token, 0, _pools.length);
+        _distribute(token, 0, _pools.length);
     }
 
-    function distribute(address token, uint start, uint finish) public lock {
+    function _distribute(address token, uint start, uint finish) internal lock {
         uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
