@@ -109,10 +109,11 @@ library FixedPoint {
     }
 }
 
+// Base V1 Fees contract is used as a 1:1 pair relationship to split out fees, this ensures that the curve does not need to be modified for LP shares
 contract BaseV1Fees {
-    address immutable pair;
-    address immutable token0;
-    address immutable token1;
+    address immutable pair; // The pair it is bonded to
+    address immutable token0; // token0 of pair, saved localy and statically for gas optimization
+    address immutable token1; // Token1 of pair, saved localy and statically for gas optimization
     constructor(address _token0, address _token1) {
         pair = msg.sender;
         token0 = _token0;
@@ -125,6 +126,7 @@ contract BaseV1Fees {
         require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 
+    // Allow the pair to transfer fees to users
     function claimFeesFor(address recipient, uint amount0, uint amount1) external {
         require(msg.sender == pair);
         if (amount0 > 0) _safeTransfer(token0, recipient, amount0);
@@ -133,6 +135,7 @@ contract BaseV1Fees {
 
 }
 
+// The base pair of pools, either stable or volatile
 contract BaseV1Pair {
     using FixedPoint for *;
     using UQ112x112 for uint224;
@@ -141,6 +144,7 @@ contract BaseV1Pair {
     string public symbol;
     uint8 public decimals;
 
+    // Used to denote stable or volatile pair, not immutable since construction happens in the initialize method for CREATE2 deterministic addresses
     bool public stable;
 
     uint public totalSupply = 0;
@@ -163,12 +167,14 @@ contract BaseV1Pair {
     address public token1;
     address public fees;
 
+    // Structure to capture time period obervations every 30 minutes, used for local oracles
     struct Observation {
         uint32 timestamp;
         uint price0Cumulative;
         uint price1Cumulative;
     }
 
+    // Capture oracle reading every 30 minutes
     uint public constant periodSize = 1800;
 
     function observationLength() external view returns (uint) {
@@ -188,27 +194,32 @@ contract BaseV1Pair {
     uint112 public reserve1;
     uint32 public blockTimestampLast;
 
+    // reserve0Last and reserve1Last is added to allow for liquidity checks to ensure no liquidity manipulation via flash loan
     uint public reserve0Last;
     uint public reserve1Last;
     uint public price0CumulativeLast;
     uint public price1CumulativeLast;
-    uint public kLast;
 
+    // index0 and index1 are used to accumulate fees, this is split out from normal trades to keep the swap "clean"
+    // this further allows LP holders to easily claim fees for tokens they have/staked
     uint public index0 = 0;
     uint public index1 = 0;
 
+    // position assigned to each LP to track their current index0 & index1 vs the global position
     mapping(address => uint) public supplyIndex0;
     mapping(address => uint) public supplyIndex1;
 
+    // Accrue fees on token0
     function _update0(uint amount) internal {
-        _safeTransfer(token0, fees, amount);
-        uint256 _ratio = amount * 1e18 / totalSupply;
+        _safeTransfer(token0, fees, amount); // transfer the fees out to BaseV1Fees
+        uint256 _ratio = amount * 1e18 / totalSupply; // 1e18 adjustment is removed during claim
         if (_ratio > 0) {
           index0 += _ratio;
         }
         emit Fees(msg.sender, amount, 0);
     }
 
+    // Accrue fees on token1
     function _update1(uint amount) internal {
         _safeTransfer(token1, fees, amount);
         uint256 _ratio = amount * 1e18 / totalSupply;
@@ -218,9 +229,11 @@ contract BaseV1Pair {
         emit Fees(msg.sender, 0, amount);
     }
 
+    // tracks the amount of unclaimed, but claimable tokens off of fees for token0 and token1
     mapping(address => uint) public claimable0;
     mapping(address => uint) public claimable1;
 
+    // claim accumulated but unclaimed fees (viewable via claimable0 and claimable1)
     function claimFees() external {
         claimFeesFor(msg.sender);
     }
@@ -237,19 +250,21 @@ contract BaseV1Pair {
         BaseV1Fees(fees).claimFeesFor(recipient, _claimable0, _claimable1);
     }
 
+    // this function MUST be called on any balance changes, otherwise can be used to infinitely claim fees
+    // Fees are segregated from core funds, so fees can never put liquidity at risk
     function _updateFor(address recipient) internal {
-        uint _supplied = balanceOf[recipient];
+        uint _supplied = balanceOf[recipient]; // get LP balance of `recipient`
         if (_supplied > 0) {
-            uint _supplyIndex0 = supplyIndex0[recipient];
+            uint _supplyIndex0 = supplyIndex0[recipient]; // get last adjusted index0 for recipient
             uint _supplyIndex1 = supplyIndex1[recipient];
-            uint _index0 = index0;
+            uint _index0 = index0; // get global index0 for accumulated fees
             uint _index1 = index1;
-            supplyIndex0[recipient] = _index0;
+            supplyIndex0[recipient] = _index0; // update user current position to global position
             supplyIndex1[recipient] = _index1;
-            uint _delta0 = _index0 - _supplyIndex0;
+            uint _delta0 = _index0 - _supplyIndex0; // see if there is any difference that need to be accrued
             uint _delta1 = _index1 - _supplyIndex1;
             if (_delta0 > 0) {
-              uint _share = _supplied * _delta0 / 1e18;
+              uint _share = _supplied * _delta0 / 1e18; // add accrued difference for each supplied token
               claimable0[recipient] += _share;
             }
             if (_delta1 > 0) {
@@ -257,7 +272,7 @@ contract BaseV1Pair {
               claimable1[recipient] += _share;
             }
         } else {
-            supplyIndex0[recipient] = index0;
+            supplyIndex0[recipient] = index0; // new users are set to the default global state
             supplyIndex1[recipient] = index1;
         }
     }
@@ -268,6 +283,7 @@ contract BaseV1Pair {
         _blockTimestampLast = blockTimestampLast;
     }
 
+    // Only used for stable pools
     function getDecimals() public view returns (uint _decimals0, uint _decimals1) {
         _decimals0 = decimals0;
         _decimals1 = decimals1;
@@ -300,7 +316,7 @@ contract BaseV1Pair {
     }
 
     constructor() {
-        factory = msg.sender;
+        factory = msg.sender; // only factory is allowed to initialize
         uint chainId;
         assembly {
             chainId := chainid()
@@ -324,8 +340,8 @@ contract BaseV1Pair {
         stable = _stable;
         fees = address(new BaseV1Fees(_token0, _token1));
         if (_stable) {
-            decimals = 6;
-            decimals0 = 10**(erc20(_token0).decimals()-6);
+            decimals = 6; // decimal 6 instead of 8 is used since the curve can easily cause a uint overflow (x3y+y3x)
+            decimals0 = 10**(erc20(_token0).decimals()-6); // 6 points of precision is lost here, this is because the curve can't hold all 18 decimal places
             decimals1 = 10**(erc20(_token1).decimals()-6);
             name = string(abi.encodePacked("StableV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
             symbol = string(abi.encodePacked("sAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
@@ -348,11 +364,12 @@ contract BaseV1Pair {
         if (timeElapsed > 0 && _reserve0 != 0 && _reserve1 != 0) {
             price0CumulativeLast += uint(UQ112x112.encode(_reserve1).uqdiv(_reserve0)) * timeElapsed;
             price1CumulativeLast += uint(UQ112x112.encode(_reserve0).uqdiv(_reserve1)) * timeElapsed;
-            reserve0Last = _reserve0;
+            reserve0Last = _reserve0; // save last reserve, allows external liquidity checks to ensure reserves weren't manipulated by flash loans
             reserve1Last = _reserve1;
         }
+
         Observation memory _point = lastObservation();
-        timeElapsed = blockTimestamp - _point.timestamp;
+        timeElapsed = blockTimestamp - _point.timestamp; // compare the last observation with current timestamp, if greater than 30 minutes, record a new event
         if (timeElapsed > periodSize) {
             observations.push(Observation(blockTimestamp, price0CumulativeLast, price1CumulativeLast));
         }
@@ -362,6 +379,7 @@ contract BaseV1Pair {
         emit Sync(uint112(reserve0), uint112(reserve1));
     }
 
+    // simple re-entrancy check
     uint _unlocked = 1;
     modifier lock() {
         require(_unlocked == 1);
@@ -370,10 +388,12 @@ contract BaseV1Pair {
         _unlocked = 1;
     }
 
+    // returns current timestamp
     function currentBlockTimestamp() public view returns (uint32) {
         return uint32(block.timestamp % 2 ** 32);
     }
 
+    // calculate the price, used for twap oracles, not used for spot price
     function computeAmountOut(
         uint priceCumulativeStart, uint priceCumulativeEnd,
         uint timeElapsed, uint amountIn
@@ -404,6 +424,7 @@ contract BaseV1Pair {
         }
     }
 
+    // gives the current twap price measured from amountIn * tokenIn gives amountOut
     function current(address tokenIn, uint amountIn) external view returns (uint amountOut) {
         Observation memory _observation = lastObservation();
         (uint price0Cumulative, uint price1Cumulative,) = currentCumulativePrices();
@@ -420,6 +441,7 @@ contract BaseV1Pair {
         }
     }
 
+    // as per `current`, however allows user configured granularity, up to the full window size
     function quote(address tokenIn, uint amountIn, uint granularity) external view returns (uint amountOut) {
         uint priceAverageCumulative = 0;
         uint length = observations.length-1;
@@ -447,6 +469,7 @@ contract BaseV1Pair {
         return priceAverageCumulative / granularity;
     }
 
+    // returns a memory set of twap prices
     function prices(address tokenIn, uint amountIn, uint points) external view returns (uint[] memory) {
         return sample(tokenIn, amountIn, points, 1);
     }
@@ -482,6 +505,7 @@ contract BaseV1Pair {
     }
 
     // this low-level function should be called from a contract which performs important safety checks
+    // standard uniswap v2 implementation
     function mint(address to) external lock returns (uint liquidity) {
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
         uint _balance0 = erc20(token0).balanceOf(address(this));
@@ -504,6 +528,7 @@ contract BaseV1Pair {
     }
 
     // this low-level function should be called from a contract which performs important safety checks
+    // standard uniswap v2 implementation
     function burn(address to) external lock returns (uint amount0, uint amount1) {
         (uint112 _reserve0, uint112 _reserve1,) = getReserves(); // gas savings
         address _token0 = token0;                                // gas savings
@@ -540,7 +565,7 @@ contract BaseV1Pair {
         require(to != _token0 && to != _token1, 'IT'); // BaseV1: INVALID_TO
         if (amount0Out > 0) _safeTransfer(_token0, to, amount0Out); // optimistically transfer tokens
         if (amount1Out > 0) _safeTransfer(_token1, to, amount1Out); // optimistically transfer tokens
-        if (data.length > 0) IBaseV1Callee(to).hook(msg.sender, amount0Out, amount1Out, data);
+        if (data.length > 0) IBaseV1Callee(to).hook(msg.sender, amount0Out, amount1Out, data); // callback, used for flash loans
         _balance0 = erc20(_token0).balanceOf(address(this));
         _balance1 = erc20(_token1).balanceOf(address(this));
         }
@@ -550,10 +575,11 @@ contract BaseV1Pair {
         { // scope for reserve{0,1}Adjusted, avoids stack too deep errors
         address _token0 = token0;
         address _token1 = token1;
-        if (amount0In > 0) _update0(amount0In / 10000); // accrue fees for token0
-        if (amount1In > 0) _update1(amount1In / 10000); // accrue fees for token1
-        _balance0 = erc20(_token0).balanceOf(address(this));
+        if (amount0In > 0) _update0(amount0In / 10000); // accrue fees for token0 and move them out of pool
+        if (amount1In > 0) _update1(amount1In / 10000); // accrue fees for token1 and move them out of pool
+        _balance0 = erc20(_token0).balanceOf(address(this)); // since we removed tokens, we need to reconfirm balances, can also simply use previous balance - amountIn/ 10000, but doing balanceOf again as safety check
         _balance1 = erc20(_token1).balanceOf(address(this));
+        // The curve, either x3y+y3x for stable pools, or x*y for volatile pools
         require(_k(_balance0/decimals0, _balance1/decimals1) >= _k(_reserve0/decimals0, _reserve1/decimals1), 'K'); // BaseV1: K
         }
 
@@ -574,6 +600,7 @@ contract BaseV1Pair {
         _update(erc20(token0).balanceOf(address(this)), erc20(token1).balanceOf(address(this)), reserve0, reserve1);
     }
 
+    // quote is used for current spot price given reserves (use getAmountOut instead, quote is a utility function)
     function quote(uint amountA, uint reserveA, uint reserveB) external view returns (uint) {
         if (stable) {
             return Math.sqrt(Math.sqrt(_k(amountA+reserveA, reserveB))) * 2;
@@ -582,6 +609,7 @@ contract BaseV1Pair {
         }
     }
 
+    // getAmountOut gives the amount that will be returned given the amountIn for tokenIn
     function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
         (uint reserveA, uint reserveB,) = getReserves();
         (reserveA, reserveB) = tokenIn == token0 ? (reserveA, reserveB) : (reserveB, reserveA);
@@ -594,14 +622,14 @@ contract BaseV1Pair {
 
     function _k(uint x, uint y) internal view returns (uint) {
       if (stable) {
-          return x * y * (x**2+y**2) / 2;
+          return x * y * (x**2+y**2) / 2;  // x3y+y3x >= k
       } else {
-          return x * y;
+          return x * y; // xy >= k
       }
     }
 
     function _mint(address dst, uint amount) internal {
-        _updateFor(dst);
+        _updateFor(dst); // balances must be updated on mint/burn/transfer
         totalSupply += amount;
         balanceOf[dst] += amount;
         emit Transfer(address(0), dst, amount);
@@ -658,8 +686,8 @@ contract BaseV1Pair {
     }
 
     function _transferTokens(address src, address dst, uint amount) internal {
-        _updateFor(src);
-        _updateFor(dst);
+        _updateFor(src); // update fee position for src
+        _updateFor(dst); // update fee position for dst
 
         balanceOf[src] -= amount;
         balanceOf[dst] += amount;
@@ -672,7 +700,7 @@ contract BaseV1Factory {
 
     mapping(address => mapping(address => mapping(bool => address))) public getPair;
     address[] public allPairs;
-    mapping(address => bool) public isPair;
+    mapping(address => bool) public isPair; // simplified check if its a pair, given that `stable` flag might not be available in peripherals
 
     event PairCreated(address indexed token0, address indexed token1, bool stable, address pair, uint);
 
@@ -690,7 +718,7 @@ contract BaseV1Factory {
         require(token0 != address(0), 'ZA'); // BaseV1: ZERO_ADDRESS
         require(getPair[token0][token1][stable] == address(0), 'PE'); // BaseV1: PAIR_EXISTS - single check is sufficient
         bytes memory bytecode = type(BaseV1Pair).creationCode;
-        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable));
+        bytes32 salt = keccak256(abi.encodePacked(token0, token1, stable)); // notice salt includes stable as well, 3 parameters
         assembly {
             pair := create2(0, add(bytecode, 32), mload(bytecode), salt)
         }
