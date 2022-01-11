@@ -593,15 +593,6 @@ contract BaseV1Pair {
         _update(erc20(token0).balanceOf(address(this)), erc20(token1).balanceOf(address(this)), reserve0, reserve1);
     }
 
-    // quote is used for current spot price given reserves (use getAmountOut instead, quote is a utility function)
-    function quote(uint amountA, uint reserveA, uint reserveB) external view returns (uint) {
-        if (stable) {
-            return Math.sqrt(Math.sqrt(_k(amountA+reserveA, reserveB))) * 2;
-        } else {
-            return amountA * reserveB / reserveA;
-        }
-    }
-
     // getAmountOut gives the amount that will be returned given the amountIn for tokenIn
     function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
         (uint _reserve0, uint _reserve1,) = getReserves();

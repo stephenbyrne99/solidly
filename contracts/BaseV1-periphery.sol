@@ -18,7 +18,6 @@ interface IBaseV1Pair {
     function mint(address to) external returns (uint liquidity);
     function getReserves() external view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast);
     function getAmountOut(uint, address) external view returns (uint);
-    function quote(uint, uint, uint) external view returns (uint);
 }
 
 interface erc20 {
@@ -96,7 +95,7 @@ contract BaseV1Router01 {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1, stable)),
-                hex'74a641de1c8be725ceb9f34b7d02a50e6a3e14ee0ddaa576e9d7de97c8931c51' // init code hash
+                hex'f2ac1463357c16252a2fdb78778b92847f65987ec7b123a95a1491364ab1e820' // init code hash
             )))));
     }
 
