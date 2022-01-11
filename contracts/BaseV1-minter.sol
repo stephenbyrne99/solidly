@@ -11,6 +11,7 @@ library Math {
 }
 
 interface ve {
+    function token() external view returns (address);
     function totalSupply() external view returns (uint);
 }
 
@@ -28,9 +29,11 @@ interface ve_dist {
     function checkpoint_total_supply() external;
 }
 
+// codifies the minting rules as per ve(3,3), abstracted from the token to support any token that allows minting
+
 contract minter {
-    uint constant week = 86400 * 7;
-    uint constant emission = 4;
+    uint constant week = 86400 * 7; // allows minting once per week (reset every Thursday 00:00 UTC)
+    uint constant emission = 4; // 0.4% per week target emission
     uint constant base = 100;
     token public immutable _token;
     gauge_proxy public immutable _gauge_proxy;
@@ -40,42 +43,47 @@ contract minter {
     uint public active_period;
 
     constructor(
-      address __token,
-      uint _available,
-      address __gauge_proxy,
-      address  __ve,
-      address __ve_dist
+      uint _available, // the minting target halfway point, assuming 500mm
+      address __gauge_proxy, // the voting & distribution system
+      address  __ve, // the ve(3,3) system that will be locked into
+      address __ve_dist // the distribution system that ensures users aren't diluted
     ) {
-        _token = token(__token);
+        _token = token(ve(__ve).token());
         available = _available;
         _gauge_proxy = gauge_proxy(__gauge_proxy);
         _ve = ve(__ve);
         _ve_dist = ve_dist(__ve_dist);
     }
 
+    // calculate circulating supply as total token supply - locked supply
     function circulating_supply() public view returns (uint) {
         return _token.totalSupply() - _ve.totalSupply();
     }
 
+    // emission calculation is 0.4% of available supply to mint adjusted by circulating / total supply
     function calculate_emission() public view returns (uint) {
         return available * emission / base * circulating_supply() / _token.totalSupply();
     }
 
+    // weekly emission takes the max of calculated (aka target) emission versus circulating tail end emission
     function weekly_emission() public view returns (uint) {
         return Math.max(calculate_emission(), circulating_emission());
     }
 
+    // calculates tail end (infinity) emissions as 0.4% of total supply
     function circulating_emission() public view returns (uint) {
         return circulating_supply() * emission / base;
     }
 
+    // calculate inflation and adjust ve balances accordingly
     function calculate_growth(uint _minted) public view returns (uint) {
         return _ve.totalSupply() * _minted / circulating_supply();
     }
 
+    // update period can only be called once per cycle (1 week)
     function update_period() external returns (uint) {
         uint _period = active_period;
-        if (block.timestamp >= _period + week) {
+        if (block.timestamp >= _period + week) { // only trigger if new week
             _period = block.timestamp / week * week;
             active_period = _period;
             uint _amount = weekly_emission();
@@ -83,10 +91,11 @@ contract minter {
                 available -= _amount;
             }
 
-            _token.mint(address(_gauge_proxy), _amount);
-            _token.mint(address(_ve_dist), calculate_growth(_amount));
-            _ve_dist.checkpoint_token();
-            _ve_dist.checkpoint_total_supply();
+            _token.mint(address(_gauge_proxy), _amount); // mint weekly emission to gauge proxy (handles voting and distribution)
+            _gauge_proxy.distribute(_token); // distribute the weekly emission to gauges
+            _token.mint(address(_ve_dist), calculate_growth(_amount)); // mint inflation for staked users based on their % balance
+            _ve_dist.checkpoint_token(); // checkpoint token balance that was just minted in ve_dist
+            _ve_dist.checkpoint_total_supply(); // checkpoint supply
         }
         return _period;
     }
