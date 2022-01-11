@@ -86,14 +86,17 @@ abstract contract RewardBase {
 
     // used to notify a gauge/bribe of a given reward, this can create griefing attacks by extending rewards
     // TODO: rework to weekly resets, _updatePeriod as per v1 bribes
-    function notifyRewardAmount(address token, uint amount) external lock updateReward(token, address(0)) {
-        _safeTransferFrom(token, msg.sender, address(this), amount);
+    function notifyRewardAmount(address token, uint amount) external lock updateReward(token, address(0)) returns (bool) {
         if (block.timestamp >= periodFinish[token]) {
+            _safeTransferFrom(token, msg.sender, address(this), amount);
             rewardRate[token] = amount / DURATION;
         } else {
             uint _remaining = periodFinish[token] - block.timestamp;
             uint _left = _remaining * rewardRate[token];
-            require(amount >= _left); // very hacky fix for griefing attacks, consider reworking
+            if (amount < _left) {
+              return false; // don't revert to help distribute run through its tokens
+            }
+            _safeTransferFrom(token, msg.sender, address(this), amount);
             rewardRate[token] = (amount + _left) / DURATION;
         }
 
@@ -105,6 +108,7 @@ abstract contract RewardBase {
             isIncentive[token] = true;
             incentives.push(token);
         }
+        return true;
     }
 
     modifier updateReward(address token, address account) virtual;
@@ -280,14 +284,13 @@ contract BaseV1Gauges {
         _unlocked = 1;
     }
 
-    address[] internal _pools;
+    address[] internal _pools; // all pools viable for incentives
     mapping(address => address) public gauges; // pool => gauge
     mapping(address => address) public bribes; // gauge => bribe
     mapping(address => uint) public weights; // pool => weight
     mapping(address => mapping(address => uint)) public votes; // msg.sender => votes
     mapping(address => address[]) public poolVote;// msg.sender => pools
     mapping(address => uint) public usedWeights;  // msg.sender => total voting weight of user
-    mapping(address => bool) public enabled;
 
     function pools() external view returns (address[] memory) {
         return _pools;
@@ -371,22 +374,6 @@ contract BaseV1Gauges {
         _vote(msg.sender, _poolVote, _weights);
     }
 
-    function enabledPools() external view returns (address[] memory active) {
-        uint _size = 0;
-        for (uint i = 0; i < _pools.length; i++) {
-            if (enabled[_pools[i]]) {
-                _size++;
-            }
-        }
-        uint x = 0;
-        active = new address[](_size);
-        for (uint i = 0; i < _pools.length; i++) {
-            if (enabled[_pools[i]]) {
-                active[x++] = _pools[i];
-            }
-        }
-    }
-
     function createGauge(address _pool) external returns (address) {
         require(gauges[_pool] == address(0x0), "exists");
         require(IBaseV1Factory(factory).isPair(_pool), "!_pool");
@@ -394,7 +381,6 @@ contract BaseV1Gauges {
         address _bribe = address(new Bribe());
         bribes[_gauge] = _bribe;
         gauges[_pool] = _gauge;
-        enabled[_pool] = true;
         _pools.push(_pool);
         return _gauge;
     }
@@ -407,21 +393,15 @@ contract BaseV1Gauges {
         uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
-            for (uint i = 0; i < _pools.length; i++) {
-                if (!enabled[_pools[i]]) {
-                    _totalWeight -= weights[_pools[i]];
-                }
-            }
             for (uint x = 0; x < _pools.length; x++) {
-                if (enabled[_pools[x]]) {
-                    uint _reward = _balance * weights[_pools[x]] / _totalWeight;
-                    if (_reward > 0) {
-                        address _gauge = gauges[_pools[x]];
+              uint _reward = _balance * weights[_pools[x]] / _totalWeight;
+              if (_reward > 0) {
+                  address _gauge = gauges[_pools[x]];
 
-                        erc20(token).approve(_gauge, _reward);
-                        Gauge(_gauge).notifyRewardAmount(token, _reward);
-                    }
-                }
+                  erc20(token).approve(_gauge, 0); // first set to 0, this helps reset some non-standard tokens
+                  erc20(token).approve(_gauge, _reward);
+                  Gauge(_gauge).notifyRewardAmount(token, _reward); // can return false, will simply not distribute tokens
+              }
             }
         }
     }
