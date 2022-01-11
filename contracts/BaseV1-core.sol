@@ -335,8 +335,8 @@ contract BaseV1Pair {
         fees = address(new BaseV1Fees(_token0, _token1));
         decimals = 18; // decimal 6 instead of 8 is used since the curve can easily cause a uint overflow (x3y+y3x)
         if (_stable) {
-            decimals0 = 10**erc20(_token0).decimals();
-            decimals1 = 10**erc20(_token0).decimals();
+            decimals0 = 10**(18-erc20(_token0).decimals());
+            decimals1 = 10**(18-erc20(_token1).decimals());
             name = string(abi.encodePacked("StableV1 AMM - ", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
             symbol = string(abi.encodePacked("sAMM-", erc20(_token0).symbol(), "/", erc20(_token1).symbol()));
         } else {
@@ -604,19 +604,23 @@ contract BaseV1Pair {
 
     // getAmountOut gives the amount that will be returned given the amountIn for tokenIn
     function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
-        (uint reserveA, uint reserveB,) = getReserves();
-        (reserveA, reserveB) = tokenIn == token0 ? (reserveA, reserveB) : (reserveB, reserveA);
-        (uint amountA, uint amountB) = tokenIn == token0 ? (amountIn, uint(0)) : (uint(0), amountIn);
+        (uint _reserve0, uint _reserve1,) = getReserves();
         if (stable) {
-            return Math.sqrt(Math.sqrt(_k(amountA+reserveA, amountB+reserveB))) * 2;
+            (uint amount0, uint amount1) = tokenIn == token0 ? (amountIn, uint(0)) : (uint(0), amountIn);
+            return Math.sqrt(Math.sqrt(_k(amount0+_reserve0, amount1+_reserve0))) * 2;
         } else {
+            (uint reserveA, uint reserveB) = tokenIn == token0 ? (_reserve0, _reserve1) : (_reserve1, _reserve0);
             return amountIn * reserveB / reserveA;
         }
     }
 
     function _k(uint x, uint y) internal view returns (uint) {
       if (stable) {
-          return (x * y) / decimals0 * (x**2/decimals0+y**2/decimals1) / decimals1 / 2;  // x3y+y3x >= k
+          uint _x = x * decimals0;
+          uint _y = y * decimals1;
+          uint _a = (_x * _y) / 1e18;
+          uint _b = ((_x * _x) / 1e18 + (_y * _y) / 1e18);
+          return _a * _b / 1e18 / 2;  // x3y+y3x >= k
       } else {
           return x * y; // xy >= k
       }
