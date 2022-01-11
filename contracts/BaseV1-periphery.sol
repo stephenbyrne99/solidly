@@ -95,7 +95,7 @@ contract BaseV1Router01 {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1, stable)),
-                hex'0c7adf42bfb8cbe252bcde8aa530f96c85c5b5037148af4274757f2dfdb86fb2' // init code hash
+                hex'0baa610825fd56f979244764782436843edfd086f0d3a4fecf0f6ee4c35e1951' // init code hash
             )))));
     }
 
