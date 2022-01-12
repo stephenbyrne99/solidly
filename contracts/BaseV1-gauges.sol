@@ -431,7 +431,7 @@ contract BaseV1Gauges {
     }
 
 
-    function distribute(address _gauge) public {
+    function distribute(address _gauge) public lock {
         uint _claimable = claimable[_gauge];
         claimable[_gauge] = 0;
         erc20(base).approve(_gauge, 0); // first set to 0, this helps reset some non-standard tokens
@@ -441,10 +441,20 @@ contract BaseV1Gauges {
         }
     }
 
-    function distribute(address[] memory _gauges) external lock {
+    function distribute(address[] memory _gauges) external {
         for (uint x = 0; x < _gauges.length; x++) {
             distribute(_gauges[x]);
         }
+    }
+
+    function distribute(uint start, uint finish) public {
+        for (uint x = start; x < finish; x++) {
+            distribute(gauges[_pools[x]]);
+        }
+    }
+
+    function distribute() external {
+        distribute(0, _pools.length);
     }
 
     function distributeEx(address token) external {
