@@ -461,6 +461,8 @@ contract BaseV1Gauges {
         distributeEx(token, 0, _pools.length);
     }
 
+    // setup distro > then distribute
+
     function distributeEx(address token, uint start, uint finish) public lock {
         uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
