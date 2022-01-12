@@ -272,6 +272,7 @@ contract BaseV1Gauges {
 
     address public immutable _ve; // the ve token that governs these contracts
     address public immutable factory; // the BaseV1Factory
+    address public immutable base;
 
     uint public totalWeight; // total voting weight
 
@@ -286,6 +287,7 @@ contract BaseV1Gauges {
 
     address[] internal _pools; // all pools viable for incentives
     mapping(address => address) public gauges; // pool => gauge
+    mapping(address => address) public poolForGauge; // pool => gauge
     mapping(address => address) public bribes; // gauge => bribe
     mapping(address => uint) public weights; // pool => weight
     mapping(address => mapping(address => uint)) public votes; // msg.sender => votes
@@ -299,6 +301,7 @@ contract BaseV1Gauges {
     constructor(address __ve, address _factory) {
         _ve = __ve;
         factory = _factory;
+        base = ve(__ve).token();
     }
 
     function reset() external {
@@ -314,6 +317,7 @@ contract BaseV1Gauges {
             uint _votes = votes[_owner][_pool];
 
             if (_votes > 0) {
+                _updateFor(gauges[_pool]);
                 totalWeight -= _votes;
                 weights[_pool] -= _votes;
                 votes[_owner][_pool] = 0;
@@ -357,12 +361,13 @@ contract BaseV1Gauges {
             uint _poolWeight = _weights[i] * _weight / _totalVoteWeight;
 
             if (_gauge != address(0x0)) {
+                _updateFor(_gauge);
                 _usedWeight += _poolWeight;
                 totalWeight += _poolWeight;
                 weights[_pool] += _poolWeight;
                 poolVote[_owner].push(_pool);
                 votes[_owner][_pool] = _poolWeight;
-                Bribe(bribes[gauges[_pool]])._deposit(_poolWeight, _owner);
+                Bribe(bribes[_gauge])._deposit(_poolWeight, _owner);
             }
         }
 
@@ -381,6 +386,8 @@ contract BaseV1Gauges {
         address _bribe = address(new Bribe());
         bribes[_gauge] = _bribe;
         gauges[_pool] = _gauge;
+        poolForGauge[_gauge] = _pool;
+        _updateFor(_gauge);
         _pools.push(_pool);
         return _gauge;
     }
@@ -389,13 +396,62 @@ contract BaseV1Gauges {
         return _pools.length;
     }
 
-    // Needs to be externally called, this needs to be refactored somehow
-    // TODO: refactor for DDOS situation where spam create pools
-    function distribute(address token) external {
-        _distribute(token, 0, _pools.length);
+    uint public index;
+    mapping(address => uint) public supplyIndex;
+    mapping(address => uint) public claimable;
+
+    // Accrue fees on token0
+    function notifyRewardAmount(uint amount) public lock {
+        _safeTransferFrom(base, msg.sender, address(this), amount); // transfer the distro in
+        uint256 _ratio = amount * 1e18 / totalWeight; // 1e18 adjustment is removed during claim
+        if (_ratio > 0) {
+          index += _ratio;
+        }
     }
 
-    function _distribute(address token, uint start, uint finish) internal lock {
+    function updateFor(address _gauge) external {
+        _updateFor(_gauge);
+    }
+
+    function _updateFor(address _gauge) internal {
+        address _pool = poolForGauge[_gauge];
+        uint _supplied = weights[_pool];
+        if (_supplied > 0) {
+            uint _supplyIndex = supplyIndex[_gauge];
+            uint _index = index; // get global index0 for accumulated distro
+            supplyIndex[_gauge] = _index; // update _gauge current position to global position
+            uint _delta = _index - _supplyIndex; // see if there is any difference that need to be accrued
+            if (_delta > 0) {
+              uint _share = _supplied * _delta / 1e18; // add accrued difference for each supplied token
+              claimable[_gauge] += _share;
+            }
+        } else {
+            supplyIndex[_gauge] = index; // new users are set to the default global state
+        }
+    }
+
+
+    function distribute(address _gauge) public {
+        uint _claimable = claimable[_gauge];
+        claimable[_gauge] = 0;
+        erc20(base).approve(_gauge, 0); // first set to 0, this helps reset some non-standard tokens
+        erc20(base).approve(_gauge, _claimable);
+        if (!Gauge(_gauge).notifyRewardAmount(base, _claimable)) { // can return false, will simply not distribute tokens
+            claimable[_gauge] = _claimable;
+        }
+    }
+
+    function distribute(address[] memory _gauges) external lock {
+        for (uint x = 0; x < _gauges.length; x++) {
+            distribute(_gauges[x]);
+        }
+    }
+
+    function distributeEx(address token) external {
+        distributeEx(token, 0, _pools.length);
+    }
+
+    function distributeEx(address token, uint start, uint finish) public lock {
         uint _balance = erc20(token).balanceOf(address(this));
         if (_balance > 0 && totalWeight > 0) {
             uint _totalWeight = totalWeight;
@@ -410,5 +466,11 @@ contract BaseV1Gauges {
               }
             }
         }
+    }
+
+    function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 }
