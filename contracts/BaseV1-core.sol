@@ -598,7 +598,7 @@ contract BaseV1Pair {
         (uint _reserve0, uint _reserve1,) = getReserves();
         if (stable) {
             (uint amount0, uint amount1) = tokenIn == token0 ? (amountIn, uint(0)) : (uint(0), amountIn);
-            return Math.sqrt(Math.sqrt(_k(amount0+_reserve0, amount1+_reserve0))) * 2;
+            return Math.sqrt(Math.sqrt(_k(amount0+_reserve0, amount1+_reserve1))) * 2;
         } else {
             (uint reserveA, uint reserveB) = tokenIn == token0 ? (_reserve0, _reserve1) : (_reserve1, _reserve0);
             return amountIn * reserveB / reserveA;
