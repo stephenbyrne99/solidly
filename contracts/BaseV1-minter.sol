@@ -16,12 +16,13 @@ interface ve {
 }
 
 interface underlying {
+    function approve(address spender, uint value) external returns (bool);
     function mint(address, uint) external;
     function totalSupply() external view returns (uint);
 }
 
 interface gauge_proxy {
-    function distribute(address token) external;
+    function notifyRewardAmount(uint amount) external;
 }
 
 interface ve_dist {
@@ -53,6 +54,7 @@ contract minter {
         _gauge_proxy = gauge_proxy(__gauge_proxy);
         _ve = ve(__ve);
         _ve_dist = ve_dist(__ve_dist);
+
     }
 
     // calculate circulating supply as total token supply - locked supply
@@ -91,7 +93,10 @@ contract minter {
                 available -= _amount;
             }
 
-            _token.mint(address(_gauge_proxy), _amount); // mint weekly emission to gauge proxy (handles voting and distribution)
+            _token.mint(address(this), _amount); // mint weekly emission to gauge proxy (handles voting and distribution)
+            _token.approve(address(_gauge_proxy), _amount);
+            _gauge_proxy.notifyRewardAmount(_amount);
+
             _token.mint(address(_ve_dist), calculate_growth(_amount)); // mint inflation for staked users based on their % balance
             _ve_dist.checkpoint_token(); // checkpoint token balance that was just minted in ve_dist
             _ve_dist.checkpoint_total_supply(); // checkpoint supply
