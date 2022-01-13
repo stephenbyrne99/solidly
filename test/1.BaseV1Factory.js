@@ -22,6 +22,7 @@ describe("BaseV1Factory", function () {
   let token;
   let ust;
   let mim;
+  let ve_underlying;
   let ve;
   let factory;
   let router;
@@ -38,8 +39,10 @@ describe("BaseV1Factory", function () {
     await ust.mint(owner.address, ethers.BigNumber.from("1000000000000000"));
     mim = await token.deploy('MIM', 'MIM', 18, owner.address);
     await mim.mint(owner.address, ethers.BigNumber.from("1000000000000000000000"));
-    ve = await token.deploy('VE', 'VE', 18, owner.address);
-    await ve.mint(owner.address, ethers.BigNumber.from("10000000000000000000000000000"));
+    ve_underlying = await token.deploy('VE', 'VE', 18, owner.address);
+    await ve_underlying.mint(owner.address, ethers.BigNumber.from("1000000000000000000000"));
+    vecontract = await ethers.getContractFactory("contracts/ve.sol:ve");
+    ve = await vecontract.deploy(ve_underlying.address);
 
     ust.deployed();
     mim.deployed();
@@ -167,14 +170,14 @@ describe("BaseV1Factory", function () {
   it("add gauge & bribe rewards", async function () {
     const pair_1000 = ethers.BigNumber.from("1000000000");
 
-    await ve.approve(gauge.address, pair_1000);
-    await ve.approve(bribe.address, pair_1000);
+    await ve_underlying.approve(gauge.address, pair_1000);
+    await ve_underlying.approve(bribe.address, pair_1000);
 
-    await gauge.notifyRewardAmount(ve.address, pair_1000);
-    await bribe.notifyRewardAmount(ve.address, pair_1000);
+    await gauge.notifyRewardAmount(ve_underlying.address, pair_1000);
+    await bribe.notifyRewardAmount(ve_underlying.address, pair_1000);
 
-    expect(await gauge.rewardRate(ve.address)).to.equal(ethers.BigNumber.from(1653));
-    expect(await bribe.rewardRate(ve.address)).to.equal(ethers.BigNumber.from(1653));
+    expect(await gauge.rewardRate(ve_underlying.address)).to.equal(ethers.BigNumber.from(1653));
+    expect(await bribe.rewardRate(ve_underlying.address)).to.equal(ethers.BigNumber.from(1653));
   });
 
   it("exit & getReward gauge stake", async function () {
@@ -185,29 +188,29 @@ describe("BaseV1Factory", function () {
     expect(await gauge.totalSupply()).to.equal(0);
   });
 
-  /*it("gauge reset", async function () {
-    await gauge_factory.reset();
+  it("gauge reset", async function () {
+    await gauge_factory.reset(1);
   });
 
   it("gauge poke self", async function () {
-    await gauge_factory.poke(owner.address);
+    await gauge_factory.poke(1);
   });
 
   it("gauge vote & bribe balanceOf", async function () {
-    await gauge_factory.vote([pair.address], [100]);
+    await gauge_factory.vote(1, [pair.address], [100]);
     expect(await gauge_factory.totalWeight()).to.not.equal(0);
-    expect(await bribe.balanceOf(owner.address)).to.not.equal(0);
+    expect(await bribe.balanceOf(1)).to.not.equal(0);
   });
 
   it("gauge distribute based on voting", async function () {
     const pair_1000 = ethers.BigNumber.from("1000000000");
-    await gauge_factory.distribute(ve.address);
+    await gauge_factory.distribute();
     await ve.transfer(gauge_factory.address, pair_1000);
     await gauge_factory.distribute(ve.address);
   });
 
   it("bribe claim rewards", async function () {
     await bribe.getReward(ve.address);
-  });*/
+  });
 
 });

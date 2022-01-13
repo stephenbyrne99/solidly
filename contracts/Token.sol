@@ -76,7 +76,7 @@ contract Token {
         return address(this);
     }
 
-    function balanceOfAtTime(address account, uint timestamp) external view returns (uint) {
+    function balance(address account) external view returns (uint) {
         return balanceOf[account];
     }
 

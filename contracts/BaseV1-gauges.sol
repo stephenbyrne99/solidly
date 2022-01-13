@@ -172,13 +172,13 @@ contract Gauge is RewardBase {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
-    function deposit() external {
+    /*function deposit() external {
         _deposit(erc20(stake).balanceOf(msg.sender), msg.sender);
     }
 
     function deposit(uint amount) external {
         _deposit(amount, msg.sender);
-    }
+    }*/
 
     function deposit(uint amount, address account) external {
         _deposit(amount, account);
@@ -532,10 +532,8 @@ contract BaseV1Gauges {
         }
     }
 
-    function distribute(address[] memory _gauges) external {
-        for (uint x = 0; x < _gauges.length; x++) {
-            distribute(_gauges[x]);
-        }
+    function distribute() external {
+        distribute(0, _pools.length);
     }
 
     function distribute(uint start, uint finish) public {
@@ -544,8 +542,10 @@ contract BaseV1Gauges {
         }
     }
 
-    function distribute() external {
-        distribute(0, _pools.length);
+    function distribute(address[] memory _gauges) external {
+        for (uint x = 0; x < _gauges.length; x++) {
+            distribute(_gauges[x]);
+        }
     }
 
     function distributeEx(address token) external {
