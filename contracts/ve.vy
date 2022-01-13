@@ -288,7 +288,7 @@ def _balance(_owner: address) -> uint256:
 
 @view
 @external
-def nftBalance(_owner: address) -> uint256:
+def balanceOf(_owner: address) -> uint256:
     """
     @dev Returns the number of NFTs owned by `_owner`.
          Throws if `_owner` is the zero address. NFTs assigned to the zero address are considered invalid.
@@ -949,7 +949,7 @@ def _balanceOf(addr: address, _t: uint256 = block.timestamp) -> uint256:
 
 @external
 @view
-def balanceOf(addr: address) -> uint256:
+def balance(addr: address) -> uint256:
     """
     @notice Get the current voting power for `msg.sender`
     @dev Adheres to the ERC20 `balanceOf` interface for Aragon compatibility

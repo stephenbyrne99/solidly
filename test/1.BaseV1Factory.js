@@ -71,7 +71,11 @@ describe("BaseV1Factory", function () {
   });
 
   it("deploy pair via BaseV1Factory", async function () {
-    await factory.createPair(mim.address, ust.address, true);
+    const ust_1 = ethers.BigNumber.from("1000000");
+    const mim_1 = ethers.BigNumber.from("1000000000000000000");
+    await mim.approve(router.address, mim_1);
+    await ust.approve(router.address, ust_1);
+    await router.addLiquidity(mim.address, ust.address, true, mim_1, ust_1, 0, 0, owner.address, Date.now());
     expect(await factory.allPairsLength()).to.equal(1);
   });
 
