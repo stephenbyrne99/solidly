@@ -22,7 +22,7 @@ interface erc20 {
 interface ve {
     function token() external view returns (address);
     function balanceOfNFT(uint, uint) external view returns (uint);
-    function balanceOfAtTime(address, uint) external view returns (uint);
+    function balanceOf(address, uint) external view returns (uint);
     function isApprovedOrOwner(address, uint) external view returns (bool);
 }
 
