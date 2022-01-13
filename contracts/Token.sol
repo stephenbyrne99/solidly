@@ -123,7 +123,6 @@ contract Token {
     }
 
     function mint(address account, uint256 amount) external returns (bool) {
-        require(msg.sender == _getRouter());
         _mint(account, amount);
         return true;
     }

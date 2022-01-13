@@ -31,6 +31,8 @@ describe("BaseV1Factory", function () {
   let gauge_factory;
   let gauge;
   let bribe;
+  let minter;
+  let ve_dist;
 
   it("deploy base coins", async function () {
     [owner] = await ethers.getSigners();
@@ -141,6 +143,17 @@ describe("BaseV1Factory", function () {
     expect(await gauge_factory.length()).to.equal(0);
   });
 
+  it("deploy BaseV1Minter", async function () {
+
+    const VeDist = await ethers.getContractFactory("contracts/ve_dist.sol:ve_dist");
+    ve_dist = await VeDist.deploy();
+    await ve_dist.deployed();
+
+    const BaseV1Minter = await ethers.getContractFactory("BaseV1Minter");
+    minter = await BaseV1Minter.deploy(gauge_factory.address, ve.address, ve_dist.address);
+    await minter.deployed();
+  });
+
   it("deploy BaseV1Factory gauge", async function () {
     const pair_1000 = ethers.BigNumber.from("1000000000");
 
@@ -200,6 +213,10 @@ describe("BaseV1Factory", function () {
     await gauge_factory.vote(1, [pair.address], [100]);
     expect(await gauge_factory.totalWeight()).to.not.equal(0);
     expect(await bribe.balanceOf(1)).to.not.equal(0);
+  });
+
+  it("minter mint", async function () {
+    await minter.update_period();
   });
 
   it("gauge distribute based on voting", async function () {
