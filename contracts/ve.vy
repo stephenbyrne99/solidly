@@ -776,7 +776,7 @@ def deposit_for(_tokenId: uint256, _value: uint256):
 
 @external
 @nonreentrant('lock')
-def create_lock(_value: uint256, _unlock_time: uint256):
+def create_lock(_value: uint256, _unlock_time: uint256) -> uint256:
     """
     @notice Deposit `_value` tokens for `msg.sender` and lock until `_unlock_time`
     @param _value Amount to deposit
@@ -795,6 +795,7 @@ def create_lock(_value: uint256, _unlock_time: uint256):
     _locked: LockedBalance = self.locked[_tokenId]
 
     self._deposit_for(msg.sender, _tokenId, _value, unlock_time, _locked, CREATE_LOCK_TYPE)
+    return _tokenId
 
 
 @external
