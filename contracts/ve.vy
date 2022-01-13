@@ -380,10 +380,10 @@ def _isApprovedOrOwner(_spender: address, _tokenId: uint256) -> bool:
     spenderIsApprovedForAll: bool = (self.ownerToOperators[owner])[_spender]
     return (spenderIsOwner or spenderIsApproved) or spenderIsApprovedForAll
 
-view
+@view
 @external
 def isApprovedOrOwner(_spender: address, _tokenId: uint256) -> bool:
-    return _isApprovedOrOwner(_spender, _tokenId);
+    return self._isApprovedOrOwner(_spender, _tokenId)
 
 @internal
 def _addTokenToOwnerList(_to: address, _tokenId: uint256):
