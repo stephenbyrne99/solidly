@@ -21,7 +21,9 @@ interface erc20 {
 
 interface ve {
     function token() external view returns (address);
+    function balanceOfNFT(uint, uint) external view returns (uint);
     function balanceOfAtTime(address, uint) external view returns (uint);
+    function isApprovedOrOwner(address, uint) external view returns (bool);
 }
 
 interface IBaseV1Factory {
@@ -225,46 +227,136 @@ contract Gauge is RewardBase {
 
 // Bribes pay out rewards for a given pool based on the votes that were received from the user (goes hand in hand with BaseV1Gauges.vote())
 // Nuance: users must call updateReward after they voted for a given bribe
-contract Bribe is RewardBase {
+contract Bribe {
 
     address immutable factory; // only factory can modify balances (since it only happens on vote())
+    address immutable _ve;
+
+    uint constant DURATION = 7 days; // rewards are released over 7 days
+    uint constant PRECISION = 10 ** 18;
+
+    address[] public incentives; // array of incentives for a given gauge/bribe
+    mapping(address => bool) public isIncentive; // confirms if the incentive is currently valid for the gauge/bribe
+
+    // default snx staking contract implementation
+    mapping(address => uint) public rewardRate;
+    mapping(address => uint) public periodFinish;
+    mapping(address => uint) public lastUpdateTime;
+    mapping(address => uint) public rewardPerTokenStored;
+
+    mapping(address => mapping(uint => uint)) public userRewardPerTokenPaid;
+    mapping(address => mapping(uint => uint)) public rewards;
+
+    uint public totalSupply;
+    mapping(uint => uint) public balanceOf;
+
+    // simple re-entrancy check
+    uint _unlocked = 1;
+    modifier lock() {
+        require(_unlocked == 1);
+        _unlocked = 0;
+        _;
+        _unlocked = 1;
+    }
+
+    function incentivesLength() external view returns (uint) {
+        return incentives.length;
+    }
+
+    // returns the last time the reward was modified or periodFinish if the reward has ended
+    function lastTimeRewardApplicable(address token) public view returns (uint) {
+        return Math.min(block.timestamp, periodFinish[token]);
+    }
+
+    // total amount of rewards returned for the 7 day duration
+    function getRewardForDuration(address token) external view returns (uint) {
+        return rewardRate[token] * DURATION;
+    }
+
+    // allows a user to claim rewards for a given token
+    function getReward(uint tokenId, address token) public lock updateReward(token, tokenId) {
+        require(ve(_ve).isApprovedOrOwner(msg.sender, tokenId));
+        uint _reward = rewards[token][tokenId];
+        rewards[token][tokenId] = 0;
+        _safeTransfer(token, msg.sender, _reward);
+    }
 
     constructor() {
         factory = msg.sender;
+        _ve = BaseV1Gauges(msg.sender)._ve();
     }
 
-    function rewardPerToken(address token) public override view returns (uint) {
+    function rewardPerToken(address token) public view returns (uint) {
         if (totalSupply == 0) {
             return rewardPerTokenStored[token];
         }
         return rewardPerTokenStored[token] + ((lastTimeRewardApplicable(token) - lastUpdateTime[token]) * rewardRate[token] * PRECISION / totalSupply);
     }
 
-    function earned(address token, address account) public override view returns (uint) {
-        return (balanceOf[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
+    function earned(address token, uint tokenId) public view returns (uint) {
+        return (balanceOf[tokenId] * (rewardPerToken(token) - userRewardPerTokenPaid[token][tokenId]) / PRECISION) + rewards[token][tokenId];
     }
 
     // This is an external function, but internal notation is used since it can only be called "internally" from BaseV1Gauges
-    function _deposit(uint amount, address account) external {
+    function _deposit(uint amount, uint tokenId) external {
         require(msg.sender == factory);
         totalSupply += amount;
-        balanceOf[account] += amount;
+        balanceOf[tokenId] += amount;
     }
 
-    function _withdraw(uint amount, address account) external {
+    function _withdraw(uint amount, uint tokenId) external {
         require(msg.sender == factory);
         totalSupply -= amount;
-        balanceOf[account] -= amount;
+        balanceOf[tokenId] -= amount;
     }
 
-    modifier updateReward(address token, address account) override {
+    modifier updateReward(address token, uint tokenId) {
         rewardPerTokenStored[token] = rewardPerToken(token);
         lastUpdateTime[token] = lastTimeRewardApplicable(token);
-        if (account != address(0)) {
-            rewards[token][account] = earned(token, account);
-            userRewardPerTokenPaid[token][account] = rewardPerTokenStored[token];
+        if (tokenId != type(uint).max) {
+            rewards[token][tokenId] = earned(token, tokenId);
+            userRewardPerTokenPaid[token][tokenId] = rewardPerTokenStored[token];
         }
         _;
+    }
+
+    // used to notify a gauge/bribe of a given reward, this can create griefing attacks by extending rewards
+    // TODO: rework to weekly resets, _updatePeriod as per v1 bribes
+    function notifyRewardAmount(address token, uint amount) external lock updateReward(token, type(uint).max) returns (bool) {
+        if (block.timestamp >= periodFinish[token]) {
+            _safeTransferFrom(token, msg.sender, address(this), amount);
+            rewardRate[token] = amount / DURATION;
+        } else {
+            uint _remaining = periodFinish[token] - block.timestamp;
+            uint _left = _remaining * rewardRate[token];
+            if (amount < _left) {
+              return false; // don't revert to help distribute run through its tokens
+            }
+            _safeTransferFrom(token, msg.sender, address(this), amount);
+            rewardRate[token] = (amount + _left) / DURATION;
+        }
+
+        lastUpdateTime[token] = block.timestamp;
+        periodFinish[token] = block.timestamp + DURATION;
+
+        // if it is a new incentive, add it to the stack
+        if (isIncentive[token] == false) {
+            isIncentive[token] = true;
+            incentives.push(token);
+        }
+        return true;
+    }
+
+    function _safeTransfer(address token, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            token.call(abi.encodeWithSelector(erc20.transfer.selector, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))));
+    }
+
+    function _safeTransferFrom(address token, address from, address to, uint256 value) internal {
+        (bool success, bytes memory data) =
+            token.call(abi.encodeWithSelector(erc20.transferFrom.selector, from, to, value));
+        require(success && (data.length == 0 || abi.decode(data, (bool))));
     }
 }
 
@@ -290,9 +382,9 @@ contract BaseV1Gauges {
     mapping(address => address) public poolForGauge; // pool => gauge
     mapping(address => address) public bribes; // gauge => bribe
     mapping(address => uint) public weights; // pool => weight
-    mapping(address => mapping(address => uint)) public votes; // msg.sender => votes
-    mapping(address => address[]) public poolVote;// msg.sender => pools
-    mapping(address => uint) public usedWeights;  // msg.sender => total voting weight of user
+    mapping(uint => mapping(address => uint)) public votes; // nft => votes
+    mapping(uint => address[]) public poolVote;// nft => pools
+    mapping(uint => uint) public usedWeights;  // nft => total voting weight of user
 
     function pools() external view returns (address[] memory) {
         return _pools;
@@ -304,50 +396,51 @@ contract BaseV1Gauges {
         base = ve(__ve).token();
     }
 
-    function reset() external {
-        _reset(msg.sender);
+    function reset(uint _tokenId) external {
+        _reset(_tokenId);
     }
 
-    function _reset(address _owner) internal {
-        address[] storage _poolVote = poolVote[_owner];
+    function _reset(uint _tokenId) internal {
+        address[] storage _poolVote = poolVote[_tokenId];
         uint _poolVoteCnt = _poolVote.length;
 
         for (uint i = 0; i < _poolVoteCnt; i ++) {
             address _pool = _poolVote[i];
-            uint _votes = votes[_owner][_pool];
+            uint _votes = votes[_tokenId][_pool];
 
             if (_votes > 0) {
                 _updateFor(gauges[_pool]);
                 totalWeight -= _votes;
                 weights[_pool] -= _votes;
-                votes[_owner][_pool] = 0;
-                Bribe(bribes[gauges[_pool]])._withdraw(_votes, _owner);
+                votes[_tokenId][_pool] = 0;
+                Bribe(bribes[gauges[_pool]])._withdraw(_votes, _tokenId);
             }
         }
 
-        delete poolVote[_owner];
+        delete poolVote[_tokenId];
     }
 
-    function poke(address _owner) public {
-        address[] memory _poolVote = poolVote[_owner];
+    function poke(uint _tokenId) public {
+        address[] memory _poolVote = poolVote[_tokenId];
         uint _poolCnt = _poolVote.length;
         uint[] memory _weights = new uint[](_poolCnt);
 
-        uint _prevUsedWeight = usedWeights[_owner];
-        uint _weight = ve(_ve).balanceOfAtTime(_owner, block.timestamp);
+        uint _prevUsedWeight = usedWeights[_tokenId];
+        uint _weight = ve(_ve).balanceOfNFT(_tokenId, block.timestamp);
 
         for (uint i = 0; i < _poolCnt; i ++) {
-            uint _prevWeight = votes[_owner][_poolVote[i]];
+            uint _prevWeight = votes[_tokenId][_poolVote[i]];
             _weights[i] = _prevWeight * _weight / _prevUsedWeight;
         }
 
-        _vote(_owner, _poolVote, _weights);
+        _vote(_tokenId, _poolVote, _weights);
     }
 
-    function _vote(address _owner, address[] memory _poolVote, uint[] memory _weights) internal {
-        _reset(_owner);
+    function _vote(uint _tokenId, address[] memory _poolVote, uint[] memory _weights) internal {
+        require(ve(_ve).isApprovedOrOwner(msg.sender, _tokenId));
+        _reset(_tokenId);
         uint _poolCnt = _poolVote.length;
-        uint _weight = ve(_ve).balanceOfAtTime(_owner, block.timestamp);
+        uint _weight = ve(_ve).balanceOfNFT(_tokenId, block.timestamp);
         uint _totalVoteWeight = 0;
         uint _usedWeight = 0;
 
@@ -365,18 +458,18 @@ contract BaseV1Gauges {
                 _usedWeight += _poolWeight;
                 totalWeight += _poolWeight;
                 weights[_pool] += _poolWeight;
-                poolVote[_owner].push(_pool);
-                votes[_owner][_pool] = _poolWeight;
-                Bribe(bribes[_gauge])._deposit(_poolWeight, _owner);
+                poolVote[_tokenId].push(_pool);
+                votes[_tokenId][_pool] = _poolWeight;
+                Bribe(bribes[_gauge])._deposit(_poolWeight, _tokenId);
             }
         }
 
-        usedWeights[_owner] = _usedWeight;
+        usedWeights[_tokenId] = _usedWeight;
     }
 
-    function vote(address[] calldata _poolVote, uint[] calldata _weights) external {
+    function vote(uint tokenId, address[] calldata _poolVote, uint[] calldata _weights) external {
         require(_poolVote.length == _weights.length);
-        _vote(msg.sender, _poolVote, _weights);
+        _vote(tokenId, _poolVote, _weights);
     }
 
     function createGauge(address _pool) external returns (address) {

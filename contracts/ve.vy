@@ -380,6 +380,11 @@ def _isApprovedOrOwner(_spender: address, _tokenId: uint256) -> bool:
     spenderIsApprovedForAll: bool = (self.ownerToOperators[owner])[_spender]
     return (spenderIsOwner or spenderIsApproved) or spenderIsApprovedForAll
 
+view
+@external
+def isApprovedOrOwner(_spender: address, _tokenId: uint256) -> bool:
+    return _isApprovedOrOwner(_spender, _tokenId);
+
 @internal
 def _addTokenToOwnerList(_to: address, _tokenId: uint256):
     """
@@ -913,6 +918,11 @@ def _balanceOfNFT(_tokenId: uint256, _t: uint256 = block.timestamp) -> uint256:
         if last_point.bias < 0:
             last_point.bias = 0
         return convert(last_point.bias, uint256)
+
+@external
+@view
+def balanceOfNFT(_tokenId: uint256, _t: uint256 = block.timestamp) -> uint256:
+    return self._balanceOfNFT(_tokenId, _t)
 
 @internal
 @view

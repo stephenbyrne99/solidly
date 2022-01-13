@@ -181,7 +181,7 @@ describe("BaseV1Factory", function () {
     expect(await gauge.totalSupply()).to.equal(0);
   });
 
-  it("gauge reset", async function () {
+  /*it("gauge reset", async function () {
     await gauge_factory.reset();
   });
 
@@ -204,6 +204,6 @@ describe("BaseV1Factory", function () {
 
   it("bribe claim rewards", async function () {
     await bribe.getReward(ve.address);
-  });
+  });*/
 
 });
