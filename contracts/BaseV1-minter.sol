@@ -44,13 +44,13 @@ contract minter {
     uint public active_period;
 
     constructor(
-      uint _available, // the minting target halfway point, assuming 500mm
+      //uint _available, // the minting target halfway point, assuming 500mm
       address __gauge_proxy, // the voting & distribution system
       address  __ve, // the ve(3,3) system that will be locked into
       address __ve_dist // the distribution system that ensures users aren't diluted
     ) {
         _token = underlying(ve(__ve).token());
-        available = _available;
+        available = 500000000e18;//_available;
         _gauge_proxy = gauge_proxy(__gauge_proxy);
         _ve = ve(__ve);
         _ve_dist = ve_dist(__ve_dist);

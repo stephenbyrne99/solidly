@@ -439,10 +439,11 @@ def _addTokenTo(_to: address, _tokenId: uint256):
     assert self.idToOwner[_tokenId] == ZERO_ADDRESS
     # Change the owner
     self.idToOwner[_tokenId] = _to
-    # Change count tracking
-    self.ownerToNFTokenCount[_to] += 1
     # Update owner token index tracking
     self._addTokenToOwnerList(_to, _tokenId)
+    # Change count tracking
+    self.ownerToNFTokenCount[_to] += 1
+
 
 
 @internal
@@ -795,8 +796,9 @@ def create_lock(_value: uint256, _unlock_time: uint256) -> uint256:
 
     self.tokenId += 1
     _tokenId: uint256 = self.tokenId
-    self._addTokenTo(msg.sender, _tokenId)
-    log Transfer(ZERO_ADDRESS, msg.sender, _tokenId)
+
+    self._mint(msg.sender, _tokenId)
+
     _locked: LockedBalance = self.locked[_tokenId]
 
     self._deposit_for(msg.sender, _tokenId, _value, unlock_time, _locked, CREATE_LOCK_TYPE)
