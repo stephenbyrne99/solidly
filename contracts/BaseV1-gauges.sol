@@ -22,7 +22,7 @@ interface erc20 {
 interface ve {
     function token() external view returns (address);
     function balanceOfNFT(uint, uint) external view returns (uint);
-    function balanceOf(address, uint) external view returns (uint);
+    function balanceOf(address) external view returns (uint);
     function isApprovedOrOwner(address, uint) external view returns (bool);
 }
 
@@ -164,7 +164,7 @@ contract Gauge is RewardBase {
     function derivedBalance(address account) public view returns (uint) {
         uint _balance = balanceOf[account];
         uint _derived = _balance * 40 / 100;
-        uint _adjusted = (totalSupply * ve(_ve).balanceOfAtTime(account, block.timestamp) / erc20(_ve).totalSupply()) * 60 / 100;
+        uint _adjusted = (totalSupply * ve(_ve).balanceOf(account) / erc20(_ve).totalSupply()) * 60 / 100;
         return Math.min(_derived + _adjusted, _balance);
     }
 
@@ -172,15 +172,13 @@ contract Gauge is RewardBase {
         return (derivedBalances[account] * (rewardPerToken(token) - userRewardPerTokenPaid[token][account]) / PRECISION) + rewards[token][account];
     }
 
-    // Current commented out since hardhat doesn't support testing with function overloading
-
-    /*function deposit() external {
+    function deposit() external {
         _deposit(erc20(stake).balanceOf(msg.sender), msg.sender);
     }
 
     function deposit(uint amount) external {
         _deposit(amount, msg.sender);
-    }*/
+    }
 
     function deposit(uint amount, address account) external {
         _deposit(amount, account);
