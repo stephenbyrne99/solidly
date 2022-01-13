@@ -596,12 +596,16 @@ contract BaseV1Pair {
     // getAmountOut gives the amount that will be returned given the amountIn for tokenIn
     function getAmountOut(uint amountIn, address tokenIn) external view returns (uint) {
         (uint _reserve0, uint _reserve1,) = getReserves();
+        amountIn -= amountIn / 10000; // remove fee from amount received
         if (stable) {
-            (uint amount0, uint amount1) = tokenIn == token0 ? (amountIn, uint(0)) : (uint(0), amountIn);
+            (uint _k0, uint _k1) = tokenIn == token0 ? (amountIn+_reserve0, _reserve1) : (_reserve0, amountIn+_reserve1);
             uint _decimalsOut = tokenIn == token0 ? decimals1 : decimals0;
             uint _kB = Math.sqrt(Math.sqrt(_k(_reserve0, _reserve1)*1e18)*1e18) * 2;
-            uint _kA = Math.sqrt(Math.sqrt(_k(amount0+_reserve0, amount1+_reserve1)*1e18)*1e18) * 2;
-            return (_kA - _kB) * _decimalsOut / 1e18;
+            uint _kA1 = Math.sqrt(Math.sqrt(_k(_k0, _k1)*1e18)*1e18) * 2;
+            uint _iteration_1 = (_kA1 - _kB) * _decimalsOut / 1e18;
+            (_k0, _k1) = tokenIn == token0 ? (amountIn+_reserve0, _reserve1-_iteration_1) : (_reserve0-_iteration_1, amountIn+_reserve1);
+            uint _kA2 = Math.sqrt(Math.sqrt(_k(_k0, _k1)*1e18)*1e18) * 2;
+            return ((_kA1 - _kB)-(_kB - _kA2)) * _decimalsOut / 1e18;
         } else {
             (uint reserveA, uint reserveB) = tokenIn == token0 ? (_reserve0, _reserve1) : (_reserve1, _reserve0);
             return amountIn * reserveB / reserveA;

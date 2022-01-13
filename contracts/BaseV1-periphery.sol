@@ -95,7 +95,7 @@ contract BaseV1Router01 {
                 hex'ff',
                 factory,
                 keccak256(abi.encodePacked(token0, token1, stable)),
-                hex'c7abfc920964b9b24084f8c44d58cc7ccb2392ac095e4695ed048d798c9a9cdc' // init code hash
+                hex'a5e7cf5f6b5d5e12ce6f4282d506b133850f398495ec00898033c2068950b4c7' // init code hash
             )))));
     }
 
@@ -216,7 +216,7 @@ contract BaseV1Router01 {
     // **** SWAP ****
     // requires the initial amount to have already been sent to the first pair
     function _swap(uint[] memory amounts, route[] memory routes, address _to) internal virtual {
-        for (uint i; i < routes.length; i++) {
+        for (uint i = 0; i < routes.length; i++) {
             (address token0,) = sortTokens(routes[i].from, routes[i].to);
             uint amountOut = amounts[i + 1];
             (uint amount0Out, uint amount1Out) = routes[i].from == token0 ? (uint(0), amountOut) : (amountOut, uint(0));
