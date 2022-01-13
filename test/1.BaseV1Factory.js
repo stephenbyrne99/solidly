@@ -204,13 +204,13 @@ describe("BaseV1Factory", function () {
 
   it("gauge distribute based on voting", async function () {
     const pair_1000 = ethers.BigNumber.from("1000000000");
-    await gauge_factory.distribute();
-    await ve.transfer(gauge_factory.address, pair_1000);
-    await gauge_factory.distribute(ve.address);
+    await gauge_factory.distro();
+    await ve_underlying.transfer(gauge_factory.address, pair_1000);
+    await gauge_factory.distro();
   });
 
   it("bribe claim rewards", async function () {
-    await bribe.getReward(ve.address);
+    await bribe.getReward(1, ve_underlying.address);
   });
 
 });

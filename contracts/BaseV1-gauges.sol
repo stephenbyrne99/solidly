@@ -532,6 +532,10 @@ contract BaseV1Gauges {
         }
     }
 
+    function distro() external {
+        distribute(0, _pools.length);
+    }
+
     function distribute() external {
         distribute(0, _pools.length);
     }
